@@ -11,6 +11,10 @@ from database.database import (
 )
 from schemas.schemas import CourseEnroll, CourseCatalogCreate, CourseProgressUpdate
 from services.auth_services import validate_object_id, serialize_user
+from services.achievement_services import AchievementService
+from services.seed_services import ensure_course_catalog_seeded
+
+CODING_CATEGORIES = {"Frontend Development", "Backend Development", "Systems Design"}
 
 def serialize_course(course: dict) -> dict:
     return {
@@ -40,6 +44,7 @@ def serialize_course_catalog(course: dict) -> dict:
         "prerequisites": course.get("prerequisites", []),
         "tags": course.get("tags", []),
         "thumbnail": course.get("thumbnail", ""),
+        "thumbnailPublicId": course.get("thumbnail_public_id", ""),
         "createdAt": course.get("created_at"),
     }
 
@@ -48,10 +53,11 @@ class CourseService:
     @staticmethod
     async def enroll_course(user_id: str, payload: CourseEnroll):
         oid = validate_object_id(user_id)
+        await ensure_course_catalog_seeded()
 
         # Check if course exists in catalog
         catalog_course = await course_catalog_collection.find_one({"slug": payload.courseSlug})
-        if not catalog_course:
+        if not catalog_course or catalog_course.get("category") not in CODING_CATEGORIES:
             raise HTTPException(404, {"message": "Course not found in catalog"})
 
         existing = await user_courses_collection.find_one({
@@ -92,7 +98,8 @@ class CourseService:
 
         courses = []
         async for c in user_courses_collection.find({"user_id": oid}):
-            courses.append(serialize_course(c))
+            if c.get("category") in CODING_CATEGORIES:
+                courses.append(serialize_course(c))
 
         return {
             "message": "User courses fetched",
@@ -110,6 +117,8 @@ class CourseService:
         })
         
         if not course:
+            raise HTTPException(404, {"message": "Course enrollment not found"})
+        if course.get("category") not in CODING_CATEGORIES:
             raise HTTPException(404, {"message": "Course enrollment not found"})
         
         # Get course details from catalog
@@ -149,10 +158,19 @@ class CourseService:
         )
 
         updated_course = await user_courses_collection.find_one({"_id": course["_id"]})
+        awarded = await AchievementService.sync_course_achievements(
+            oid,
+            course_slug,
+            int(updated_course.get("progress", 0)),
+            bool(updated_course.get("completed", False)),
+        )
 
         return {
             "message": "Course progress updated",
-            "data": serialize_course(updated_course),
+            "data": {
+                "course": serialize_course(updated_course),
+                "awards": awarded,
+            },
         }
 
 class CourseCatalogService:
@@ -176,6 +194,7 @@ class CourseCatalogService:
             "prerequisites": payload.prerequisites,
             "tags": payload.tags,
             "thumbnail": payload.thumbnail,
+            "thumbnail_public_id": payload.thumbnailPublicId,
             "created_at": datetime.utcnow(),
         }
 
@@ -193,7 +212,8 @@ class CourseCatalogService:
         difficulty: Optional[str] = None,
         search: Optional[str] = None
     ):
-        query = {}
+        await ensure_course_catalog_seeded()
+        query = {"category": {"$in": list(CODING_CATEGORIES)}}
         
         if category:
             query["category"] = category
@@ -218,8 +238,9 @@ class CourseCatalogService:
     @staticmethod
     async def get_course_by_slug(slug: str):
         """Get a single course by its slug"""
+        await ensure_course_catalog_seeded()
         course = await course_catalog_collection.find_one({"slug": slug})
-        if not course:
+        if not course or course.get("category") not in CODING_CATEGORIES:
             raise HTTPException(404, {"message": "Course not found"})
         
         return {
@@ -250,6 +271,7 @@ class CourseCatalogService:
             "prerequisites": payload.prerequisites,
             "tags": payload.tags,
             "thumbnail": payload.thumbnail,
+            "thumbnail_public_id": payload.thumbnailPublicId,
             "updated_at": datetime.utcnow(),
         }
         
@@ -290,7 +312,9 @@ class CourseCatalogService:
     @staticmethod
     async def get_course_catalog_stats():
         """Get statistics about the course catalog"""
-        total_courses = await course_catalog_collection.count_documents({})
+        await ensure_course_catalog_seeded()
+        catalog_query = {"category": {"$in": list(CODING_CATEGORIES)}}
+        total_courses = await course_catalog_collection.count_documents(catalog_query)
         
         # Count total enrollments
         total_enrollments = await user_courses_collection.count_documents({})
@@ -308,6 +332,7 @@ class CourseCatalogService:
         
         # Get category distribution
         category_pipeline = [
+            {"$match": catalog_query},
             {"$group": {"_id": "$category", "count": {"$sum": 1}}},
             {"$sort": {"count": -1}}
         ]
@@ -315,6 +340,7 @@ class CourseCatalogService:
         
         # Get difficulty distribution
         difficulty_pipeline = [
+            {"$match": catalog_query},
             {"$group": {"_id": "$difficulty", "count": {"$sum": 1}}},
             {"$sort": {"count": -1}}
         ]
@@ -335,6 +361,10 @@ class CourseCatalogService:
     @staticmethod
     async def get_course_enrollments(course_slug: str, limit: int = Query(10, ge=1, le=100)):
         """Get recent enrollments for a course"""
+        catalog_course = await course_catalog_collection.find_one({"slug": course_slug})
+        if not catalog_course or catalog_course.get("category") not in CODING_CATEGORIES:
+            raise HTTPException(404, {"message": "Course not found"})
+
         enrollments = []
         
         # Get recent enrollments with user info

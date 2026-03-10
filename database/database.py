@@ -18,5 +18,6 @@ user_profiles_collection = db.user_profiles
 user_courses_collection = db.user_courses
 quiz_progress_collection = db.quiz_progress
 quiz_questions_collection = db.quiz_questions
-game_progress_collection = db.game_progress
 course_catalog_collection = db.course_catalog
+course_curricula_collection = db.course_curricula
+achievements_collection = db.achievements
