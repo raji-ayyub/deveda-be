@@ -147,6 +147,9 @@ COURSE_CATALOG_DEFAULTS = [
 ]
 
 ROLE_DEFAULTS = {
+    "Admin": {
+        "courses": [],
+    },
     "Student": {
         "courses": [
             {"slug": "frontend-development-beginner", "category": "Frontend Development", "difficulty": "Beginner"},
@@ -156,12 +159,7 @@ ROLE_DEFAULTS = {
         ],
     },
     "Instructor": {
-        "courses": [
-            {"slug": "frontend-development-advanced", "category": "Frontend Development", "difficulty": "Advanced"},
-            {"slug": "frontend-development-mastery", "category": "Frontend Development", "difficulty": "Mastery"},
-            {"slug": "backend-development-advanced", "category": "Backend Development", "difficulty": "Advanced"},
-            {"slug": "systems-design-essentials", "category": "Systems Design", "difficulty": "Advanced"},
-        ],
+        "courses": [],
     },
 }
 

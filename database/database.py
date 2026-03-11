@@ -21,3 +21,7 @@ quiz_questions_collection = db.quiz_questions
 course_catalog_collection = db.course_catalog
 course_curricula_collection = db.course_curricula
 achievements_collection = db.achievements
+agent_assignments_collection = db.agent_assignments
+agent_threads_collection = db.agent_threads
+agent_messages_collection = db.agent_messages
+agent_artifacts_collection = db.agent_artifacts

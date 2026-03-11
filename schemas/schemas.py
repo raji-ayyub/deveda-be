@@ -5,11 +5,17 @@ from pydantic import BaseModel, EmailStr, Field, validator
 COURSE_CATEGORIES = {"Frontend Development", "Backend Development", "Systems Design"}
 COURSE_DIFFICULTIES = {"Beginner", "Intermediate", "Advanced", "Mastery"}
 USER_ROLES = {"Admin", "Instructor", "Student"}
-PUBLIC_REGISTRATION_ROLES = {"Student"}
+PUBLIC_REGISTRATION_ROLES = {"Student", "Instructor"}
 QUESTION_DIFFICULTIES = {"Easy", "Medium", "Hard"}
 QUESTION_TYPES = {"single", "multiple", "multiple_choice"}
 LESSON_CONTENT_TYPES = {"lesson", "quiz", "test", "project", "resource"}
+PLAYGROUND_MODES = {"web", "javascript"}
+PLAYGROUND_CHECK_TYPES = {"includes", "output"}
+PLAYGROUND_TARGETS = {"html", "css", "js", "console"}
 MEDIA_ASSET_TYPES = {"profile", "course"}
+AGENT_TYPES = {"course_builder", "progress_analyst", "lesson_tutor", "platform_support"}
+AGENT_REQUEST_STATUSES = {"pending", "approved", "rejected"}
+AGENT_ACTION_TYPES = {"create_course_shell", "create_curriculum_draft", "apply_curriculum_to_course", "save_planning_note", "suggest_lesson_content"}
 
 
 def _clean_text(value: str) -> str:
@@ -47,6 +53,34 @@ class UserCreate(BaseModel):
 class UserLogin(BaseModel):
     email: EmailStr
     password: str
+
+
+class PrivateAdminCreateRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=8, max_length=128)
+    firstName: str
+    lastName: str
+    adminSetupSecret: str = Field(min_length=1)
+
+    @validator("firstName", "lastName", pre=True)
+    def validate_name(cls, value: str) -> str:
+        value = _clean_text(value)
+        if len(value) < 2:
+            raise ValueError("Name must be at least 2 characters long")
+        return value
+
+    @validator("password")
+    def validate_password(cls, value: str) -> str:
+        if not any(char.isalpha() for char in value) or not any(char.isdigit() for char in value):
+            raise ValueError("Password must include both letters and numbers")
+        return value
+
+    @validator("adminSetupSecret", pre=True)
+    def validate_admin_secret(cls, value: str) -> str:
+        value = _clean_text(value)
+        if not value:
+            raise ValueError("Admin setup secret is required")
+        return value
 
 
 class UserUpdate(BaseModel):
@@ -217,6 +251,54 @@ class CourseProgressUpdate(BaseModel):
     completed: Optional[bool] = False
 
 
+class LessonPlaygroundCheckInput(BaseModel):
+    label: str
+    type: str = Field(default="includes")
+    target: str = Field(default="js")
+    value: str
+
+    @validator("label", "value", pre=True)
+    def validate_check_text(cls, value: str) -> str:
+        value = _clean_text(value)
+        if not value:
+            raise ValueError("Field cannot be empty")
+        return value
+
+    @validator("type")
+    def validate_check_type(cls, value: str) -> str:
+        value = _clean_text(value).lower()
+        if value not in PLAYGROUND_CHECK_TYPES:
+            raise ValueError("Check type must be includes or output")
+        return value
+
+    @validator("target")
+    def validate_check_target(cls, value: str) -> str:
+        value = _clean_text(value).lower()
+        if value not in PLAYGROUND_TARGETS:
+            raise ValueError("Check target must be html, css, js, or console")
+        return value
+
+
+class LessonPlaygroundInput(BaseModel):
+    mode: str = Field(default="web")
+    instructions: str = ""
+    starterHtml: Optional[str] = ""
+    starterCss: Optional[str] = ""
+    starterJs: Optional[str] = ""
+    checks: List[LessonPlaygroundCheckInput] = []
+
+    @validator("mode")
+    def validate_playground_mode(cls, value: str) -> str:
+        value = _clean_text(value).lower()
+        if value not in PLAYGROUND_MODES:
+            raise ValueError("Playground mode must be web or javascript")
+        return value
+
+    @validator("instructions", "starterHtml", "starterCss", "starterJs", pre=True)
+    def clean_playground_text(cls, value: Optional[str]) -> str:
+        return _clean_text(value or "")
+
+
 class LessonInput(BaseModel):
     title: str
     slug: str
@@ -225,6 +307,12 @@ class LessonInput(BaseModel):
     contentType: str = Field(default="lesson")
     quizId: Optional[str] = None
     quizTitle: Optional[str] = None
+    learningObjectives: List[str] = []
+    keyTakeaways: List[str] = []
+    contentMarkdown: str = ""
+    practicePrompt: Optional[str] = ""
+    instructorNotes: Optional[str] = ""
+    playground: Optional[LessonPlaygroundInput] = None
 
     @validator("title", "slug", "summary", pre=True)
     def validate_lesson_text(cls, value: str) -> str:
@@ -238,6 +326,19 @@ class LessonInput(BaseModel):
         value = _clean_text(value).lower()
         if value not in LESSON_CONTENT_TYPES:
             raise ValueError("Content type must be lesson, quiz, test, project, or resource")
+        return value
+
+    @validator("quizId", "quizTitle", "contentMarkdown", "practicePrompt", "instructorNotes", pre=True)
+    def clean_optional_lesson_text(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        return _clean_text(value)
+
+    @validator("learningObjectives", "keyTakeaways", each_item=True)
+    def validate_learning_list(cls, value: str) -> str:
+        value = _clean_text(value)
+        if not value:
+            raise ValueError("List items cannot be empty")
         return value
 
 
@@ -299,6 +400,114 @@ class MediaUploadSignatureRequest(BaseModel):
 
     @validator("publicId", pre=True)
     def validate_public_id(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        cleaned = _clean_text(value)
+        return cleaned or None
+
+
+class AgentRequestCreate(BaseModel):
+    agentType: str
+    displayName: Optional[str] = None
+    notes: Optional[str] = ""
+    courseSlug: Optional[str] = None
+    lessonSlug: Optional[str] = None
+    targetUserId: Optional[str] = None
+
+    @validator("agentType")
+    def validate_agent_type(cls, value: str) -> str:
+        agent_type = _clean_text(value).lower()
+        if agent_type not in AGENT_TYPES:
+            raise ValueError("Unknown agent type")
+        return agent_type
+
+    @validator("displayName", "notes", "courseSlug", "lessonSlug", "targetUserId", pre=True)
+    def clean_optional_text(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        cleaned = _clean_text(value)
+        return cleaned or None
+
+
+class AgentApprovalUpdate(BaseModel):
+    status: str
+    adminNotes: Optional[str] = ""
+
+    @validator("status")
+    def validate_status(cls, value: str) -> str:
+        status_value = _clean_text(value).lower()
+        if status_value not in AGENT_REQUEST_STATUSES:
+            raise ValueError("Status must be pending, approved, or rejected")
+        return status_value
+
+    @validator("adminNotes", pre=True)
+    def clean_admin_notes(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        return _clean_text(value)
+
+
+class AgentThreadCreate(BaseModel):
+    assignmentId: str
+    title: Optional[str] = None
+    initialMessage: Optional[str] = None
+    courseSlug: Optional[str] = None
+    lessonSlug: Optional[str] = None
+
+    @validator("assignmentId", pre=True)
+    def validate_assignment_id(cls, value: str) -> str:
+        value = _clean_text(value)
+        if not value:
+            raise ValueError("Assignment is required")
+        return value
+
+    @validator("title", "initialMessage", "courseSlug", "lessonSlug", pre=True)
+    def clean_thread_text(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        cleaned = _clean_text(value)
+        return cleaned or None
+
+
+class AgentMessageCreate(BaseModel):
+    message: str
+    courseSlug: Optional[str] = None
+    lessonSlug: Optional[str] = None
+    lessonTitle: Optional[str] = None
+    currentProgress: Optional[int] = Field(default=None, ge=0, le=100)
+
+    @validator("message", pre=True)
+    def validate_message(cls, value: str) -> str:
+        value = _clean_text(value)
+        if not value:
+            raise ValueError("Message is required")
+        return value
+
+    @validator("courseSlug", "lessonSlug", "lessonTitle", pre=True)
+    def clean_message_context(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        cleaned = _clean_text(value)
+        return cleaned or None
+
+
+class AgentActionCreate(BaseModel):
+    actionType: str
+    artifactId: Optional[str] = None
+    courseSlug: Optional[str] = None
+    lessonSlug: Optional[str] = None
+    targetUserId: Optional[str] = None
+    instruction: Optional[str] = ""
+
+    @validator("actionType")
+    def validate_action_type(cls, value: str) -> str:
+        action_type = _clean_text(value).lower()
+        if action_type not in AGENT_ACTION_TYPES:
+            raise ValueError("Unknown action type")
+        return action_type
+
+    @validator("artifactId", "courseSlug", "lessonSlug", "targetUserId", "instruction", pre=True)
+    def clean_action_text(cls, value: Optional[str]) -> Optional[str]:
         if value is None:
             return value
         cleaned = _clean_text(value)

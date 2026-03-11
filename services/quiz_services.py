@@ -3,7 +3,7 @@ from datetime import datetime
 from bson import ObjectId
 from fastapi import HTTPException, status
 
-from database.database import quiz_progress_collection, quiz_questions_collection, user_courses_collection
+from database.database import quiz_progress_collection, quiz_questions_collection, user_courses_collection, users_collection
 from schemas.schemas import QuestionCreate, QuizAttemptCreate
 from services.achievement_services import AchievementService
 from services.auth_services import validate_object_id
@@ -40,6 +40,21 @@ def serialize_quiz_attempt(attempt: dict) -> dict:
         "passed": attempt["passed"],
         "attemptedAt": attempt["attempted_at"],
     }
+
+
+async def ensure_student_account(user_id: ObjectId) -> dict:
+    user = await users_collection.find_one({"_id": user_id})
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"message": "User not found"},
+        )
+    if user.get("role", "Student") != "Student":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"message": "Quiz attempts are only available to student accounts"},
+        )
+    return user
 
 
 class QuizService:
@@ -147,6 +162,7 @@ class QuizService:
     @staticmethod
     async def submit_quiz_attempt(user_id: str, payload: QuizAttemptCreate):
         oid = validate_object_id(user_id)
+        await ensure_student_account(oid)
         passed = payload.score >= 60
         awarded = []
 
@@ -195,6 +211,7 @@ class QuizService:
     @staticmethod
     async def get_user_quiz_attempts(user_id: str):
         oid = validate_object_id(user_id)
+        await ensure_student_account(oid)
         attempts = []
         cursor = quiz_progress_collection.find({"user_id": oid}).sort("attempted_at", -1)
         async for attempt in cursor:

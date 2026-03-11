@@ -16,6 +16,15 @@ from services.seed_services import ensure_course_catalog_seeded
 
 CODING_CATEGORIES = {"Frontend Development", "Backend Development", "Systems Design"}
 
+
+async def ensure_student_account(user_id: ObjectId) -> dict:
+    user = await users_collection.find_one({"_id": user_id})
+    if not user:
+        raise HTTPException(404, {"message": "User not found"})
+    if user.get("role", "Student") != "Student":
+        raise HTTPException(403, {"message": "Course enrollment is only available to student accounts"})
+    return user
+
 def serialize_course(course: dict) -> dict:
     return {
         "id": str(course["_id"]),
@@ -53,6 +62,7 @@ class CourseService:
     @staticmethod
     async def enroll_course(user_id: str, payload: CourseEnroll):
         oid = validate_object_id(user_id)
+        await ensure_student_account(oid)
         await ensure_course_catalog_seeded()
 
         # Check if course exists in catalog
@@ -95,6 +105,7 @@ class CourseService:
     @staticmethod
     async def get_user_courses(user_id: str):
         oid = validate_object_id(user_id)
+        await ensure_student_account(oid)
 
         courses = []
         async for c in user_courses_collection.find({"user_id": oid}):
@@ -110,6 +121,7 @@ class CourseService:
     async def get_user_course_progress(user_id: str, course_slug: str):
         """Get a user's progress for a specific course"""
         oid = validate_object_id(user_id)
+        await ensure_student_account(oid)
         
         course = await user_courses_collection.find_one({
             "user_id": oid,
@@ -135,6 +147,7 @@ class CourseService:
     @staticmethod
     async def update_course_progress(user_id: str, course_slug: str, payload: CourseProgressUpdate):
         oid = validate_object_id(user_id)
+        await ensure_student_account(oid)
 
         course = await user_courses_collection.find_one({
             "user_id": oid,

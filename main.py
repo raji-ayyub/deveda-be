@@ -4,12 +4,18 @@ from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from schemas.schemas import (
+    AgentActionCreate,
+    AgentApprovalUpdate,
+    AgentMessageCreate,
+    AgentRequestCreate,
+    AgentThreadCreate,
     CourseCatalogCreate,
     CourseCurriculumUpsert,
     CourseEnroll,
     CourseProgressUpdate,
     MediaUploadSignatureRequest,
     PasswordChangeRequest,
+    PrivateAdminCreateRequest,
     QuestionCreate,
     QuizAttemptCreate,
     UserCreate,
@@ -18,7 +24,7 @@ from schemas.schemas import (
     UserStatusUpdate,
     UserUpdate,
 )
-from services import achievement_services, admin_services, auth_services, content_services, course_services, media_services, quiz_services
+from services import achievement_services, admin_services, agent_services, auth_services, content_services, course_services, media_services, quiz_services
 
 openapi_tags = [
     {
@@ -65,6 +71,10 @@ openapi_tags = [
         "name": "Achievements",
         "description": "Milestones, certificates, and shareable learner accomplishments.",
     },
+    {
+        "name": "Agents",
+        "description": "Multi-agent orchestration, approvals, chat threads, and role-aware learning support.",
+    },
 ]
 
 app = FastAPI(
@@ -96,11 +106,22 @@ def root():
     "/register",
     status_code=201,
     tags=["Authentication"],
-    summary="Register a student account",
-    description="Creates a new public student account and returns the authenticated session payload.",
+    summary="Register a student or instructor account",
+    description="Creates a new public student or instructor account and returns the authenticated session payload.",
 )
 async def register_user(payload: UserCreate):
     return await auth_services.AuthService.register_user(payload)
+
+
+@app.post(
+    "/auth/private-admin/register",
+    status_code=201,
+    tags=["Authentication"],
+    summary="Create a private admin account",
+    description="Creates an admin account when the correct private setup secret is supplied.",
+)
+async def register_private_admin(payload: PrivateAdminCreateRequest):
+    return await auth_services.AuthService.register_private_admin(payload)
 
 
 @app.post(
@@ -586,3 +607,137 @@ async def get_chart_data(
     current_user: dict = Depends(auth_services.require_roles("Admin", "Instructor")),
 ):
     return await admin_services.AdminService.get_chart_data(period)
+
+
+@app.get(
+    "/agents/catalog",
+    tags=["Agents"],
+    summary="List available agent templates",
+    description="Returns the agent types the current user can request based on account role.",
+)
+async def get_agent_catalog(current_user: dict = Depends(auth_services.get_current_user)):
+    return await agent_services.AgentService.get_catalog(current_user)
+
+
+@app.post(
+    "/agents/requests",
+    status_code=201,
+    tags=["Agents"],
+    summary="Request an agent assignment",
+    description="Creates an approval request for an agent assigned to the current user.",
+)
+async def create_agent_request(
+    payload: AgentRequestCreate,
+    current_user: dict = Depends(auth_services.get_current_user),
+):
+    return await agent_services.AgentService.create_request(payload, current_user)
+
+
+@app.get(
+    "/agents/assignments",
+    tags=["Agents"],
+    summary="List agent assignments",
+    description="Returns agent requests and approved assignments visible to the current user.",
+)
+async def list_agent_assignments(
+    status: Optional[str] = None,
+    current_user: dict = Depends(auth_services.get_current_user),
+):
+    return await agent_services.AgentService.list_assignments(current_user, status)
+
+
+@app.patch(
+    "/agents/requests/{assignment_id}",
+    tags=["Agents"],
+    summary="Approve or reject an agent request",
+    description="Lets admins review agent requests and mark them approved or rejected.",
+)
+async def update_agent_request(
+    assignment_id: str,
+    payload: AgentApprovalUpdate,
+    current_user: dict = Depends(auth_services.require_roles("Admin")),
+):
+    return await agent_services.AgentService.update_request_status(assignment_id, payload, current_user)
+
+
+@app.post(
+    "/agents/threads",
+    status_code=201,
+    tags=["Agents"],
+    summary="Create an agent chat thread",
+    description="Starts a new chat thread for an approved agent assignment.",
+)
+async def create_agent_thread(
+    payload: AgentThreadCreate,
+    current_user: dict = Depends(auth_services.get_current_user),
+):
+    return await agent_services.AgentService.create_thread(payload, current_user)
+
+
+@app.get(
+    "/agents/threads",
+    tags=["Agents"],
+    summary="List agent chat threads",
+    description="Returns chat threads that belong to the current user or all threads for admins.",
+)
+async def list_agent_threads(
+    assignmentId: Optional[str] = None,
+    current_user: dict = Depends(auth_services.get_current_user),
+):
+    return await agent_services.AgentService.list_threads(current_user, assignmentId)
+
+
+@app.get(
+    "/agents/artifacts",
+    tags=["Agents"],
+    summary="List agent artifacts",
+    description="Returns saved agent outputs such as curriculum drafts and lesson-planning notes.",
+)
+async def list_agent_artifacts(
+    assignmentId: Optional[str] = None,
+    current_user: dict = Depends(auth_services.get_current_user),
+):
+    return await agent_services.AgentService.list_artifacts(current_user, assignmentId)
+
+
+@app.get(
+    "/agents/threads/{thread_id}",
+    tags=["Agents"],
+    summary="Get one agent chat thread",
+    description="Returns a thread with all user and assistant messages in chronological order.",
+)
+async def get_agent_thread(
+    thread_id: str,
+    current_user: dict = Depends(auth_services.get_current_user),
+):
+    return await agent_services.AgentService.get_thread(thread_id, current_user)
+
+
+@app.post(
+    "/agents/threads/{thread_id}/messages",
+    status_code=201,
+    tags=["Agents"],
+    summary="Send a message to an agent",
+    description="Adds a user message to the thread and returns the assistant response.",
+)
+async def post_agent_message(
+    thread_id: str,
+    payload: AgentMessageCreate,
+    current_user: dict = Depends(auth_services.get_current_user),
+):
+    return await agent_services.AgentService.post_message(thread_id, payload, current_user)
+
+
+@app.post(
+    "/agents/assignments/{assignment_id}/actions",
+    status_code=201,
+    tags=["Agents"],
+    summary="Run a safe agent action",
+    description="Runs an approved agent action such as creating a course shell, drafting curriculum, applying curriculum, or saving planning notes.",
+)
+async def run_agent_action(
+    assignment_id: str,
+    payload: AgentActionCreate,
+    current_user: dict = Depends(auth_services.get_current_user),
+):
+    return await agent_services.AgentService.run_action(assignment_id, payload, current_user)

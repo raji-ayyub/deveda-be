@@ -19,6 +19,7 @@ from database.database import (
 from schemas.schemas import (
     PUBLIC_REGISTRATION_ROLES,
     PasswordChangeRequest,
+    PrivateAdminCreateRequest,
     UserCreate,
     UserLogin,
     UserPatch,
@@ -31,6 +32,7 @@ auth_scheme = HTTPBearer(auto_error=False)
 JWT_SECRET = os.getenv("JWT_SECRET") or os.getenv("SECRET_KEY") or "deveda-local-dev-secret"
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "10080"))
+ADMIN_SETUP_SECRET = os.getenv("ADMIN_SETUP_SECRET", "")
 
 
 def hash_password(password: str) -> str:
@@ -209,7 +211,7 @@ class AuthService:
         if payload.role not in PUBLIC_REGISTRATION_ROLES:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail={"message": "Public registration is currently limited to student accounts"},
+                detail={"message": "Public registration is currently limited to student and instructor accounts"},
             )
 
         await _ensure_unique_email(payload.email)
@@ -220,7 +222,7 @@ class AuthService:
             "password": hash_password(payload.password),
             "first_name": payload.firstName,
             "last_name": payload.lastName,
-            "role": "Student",
+            "role": payload.role,
             "is_active": True,
             "avatar_url": "",
             "avatar_public_id": "",
@@ -235,6 +237,43 @@ class AuthService:
         await seed_user_data(user["_id"], user["role"])
 
         return build_auth_response(user, "Account created successfully")
+
+    @staticmethod
+    async def register_private_admin(payload: PrivateAdminCreateRequest):
+        if not ADMIN_SETUP_SECRET:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={"message": "Private admin setup is not configured on the server"},
+            )
+
+        if payload.adminSetupSecret != ADMIN_SETUP_SECRET:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={"message": "Invalid admin setup secret"},
+            )
+
+        await _ensure_unique_email(payload.email)
+
+        now = datetime.utcnow()
+        user = {
+            "email": payload.email,
+            "password": hash_password(payload.password),
+            "first_name": payload.firstName,
+            "last_name": payload.lastName,
+            "role": "Admin",
+            "is_active": True,
+            "avatar_url": "",
+            "avatar_public_id": "",
+            "created_at": now,
+            "last_login": now,
+        }
+
+        result = await users_collection.insert_one(user)
+        user["_id"] = result.inserted_id
+
+        await seed_user_data(user["_id"], user["role"])
+
+        return build_auth_response(user, "Admin account created successfully")
 
     @staticmethod
     async def login_user(payload: UserLogin):

@@ -4,7 +4,7 @@ from uuid import uuid4
 
 from bson import ObjectId
 
-from database.database import achievements_collection, course_catalog_collection, course_curricula_collection
+from database.database import achievements_collection, course_catalog_collection, course_curricula_collection, users_collection
 from services.content_services import build_curriculum_scaffold
 from services.auth_services import validate_object_id
 
@@ -143,6 +143,12 @@ class AchievementService:
     @staticmethod
     async def get_user_achievements(user_id: str, course_slug: Optional[str] = None):
         oid = validate_object_id(user_id)
+        user = await users_collection.find_one({"_id": oid})
+        if not user:
+            return {"message": "Achievements fetched", "data": []}
+        if user.get("role", "Student") != "Student":
+            return {"message": "Achievements fetched", "data": []}
+
         query = {"user_id": oid}
         if course_slug:
             query["course_slug"] = course_slug
