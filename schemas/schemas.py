@@ -14,8 +14,28 @@ PLAYGROUND_CHECK_TYPES = {"includes", "output"}
 PLAYGROUND_TARGETS = {"html", "css", "js", "console"}
 MEDIA_ASSET_TYPES = {"profile", "course"}
 AGENT_TYPES = {"course_builder", "progress_analyst", "lesson_tutor", "platform_support"}
+CONTENT_INGESTION_TYPES = {"course", "lesson", "quiz", "question_bank"}
+CONTENT_GENERATION_ACTION_TYPES = {
+    "create_course_shell",
+    "generate_overview",
+    "generate_module",
+    "generate_questions",
+}
 AGENT_REQUEST_STATUSES = {"pending", "approved", "rejected"}
-AGENT_ACTION_TYPES = {"create_course_shell", "create_curriculum_draft", "apply_curriculum_to_course", "save_planning_note", "suggest_lesson_content"}
+AGENT_ACTION_TYPES = {
+    "draft_course_catalog",
+    "create_course_shell",
+    "create_curriculum_draft",
+    "apply_curriculum_to_course",
+    "save_planning_note",
+    "suggest_lesson_content",
+    "plan_lesson_content",
+    "generate_lesson_content",
+    "plan_course_content",
+    "generate_course_content",
+    "generate_module_content",
+    "generate_question_content",
+}
 
 
 def _clean_text(value: str) -> str:
@@ -249,6 +269,22 @@ class CourseCatalogCreate(BaseModel):
 class CourseProgressUpdate(BaseModel):
     progress: int = Field(ge=0, le=100)
     completed: Optional[bool] = False
+    completedLessonSlugs: Optional[List[str]] = None
+    currentLessonSlug: Optional[str] = None
+
+    @validator("completedLessonSlugs", each_item=True)
+    def validate_completed_lesson_slug(cls, value: str) -> str:
+        value = _clean_text(value)
+        if not value:
+            raise ValueError("Completed lesson slugs cannot be empty")
+        return value
+
+    @validator("currentLessonSlug", pre=True)
+    def clean_current_lesson_slug(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        cleaned = _clean_text(value)
+        return cleaned or None
 
 
 class LessonPlaygroundCheckInput(BaseModel):
@@ -302,6 +338,9 @@ class LessonPlaygroundInput(BaseModel):
 class LessonInput(BaseModel):
     title: str
     slug: str
+    libraryLessonSlug: Optional[str] = None
+    source: Optional[str] = "manual"
+    generationStatus: Optional[str] = "generated"
     summary: str
     durationMinutes: int = Field(default=15, ge=1)
     contentType: str = Field(default="lesson")
@@ -309,7 +348,9 @@ class LessonInput(BaseModel):
     quizTitle: Optional[str] = None
     learningObjectives: List[str] = []
     keyTakeaways: List[str] = []
+    learningFlow: List[str] = []
     contentMarkdown: str = ""
+    visualAidMarkdown: Optional[str] = ""
     practicePrompt: Optional[str] = ""
     instructorNotes: Optional[str] = ""
     playground: Optional[LessonPlaygroundInput] = None
@@ -328,13 +369,33 @@ class LessonInput(BaseModel):
             raise ValueError("Content type must be lesson, quiz, test, project, or resource")
         return value
 
-    @validator("quizId", "quizTitle", "contentMarkdown", "practicePrompt", "instructorNotes", pre=True)
+    @validator(
+        "libraryLessonSlug",
+        "source",
+        "generationStatus",
+        "quizId",
+        "quizTitle",
+        "contentMarkdown",
+        "visualAidMarkdown",
+        "practicePrompt",
+        "instructorNotes",
+        pre=True,
+    )
     def clean_optional_lesson_text(cls, value: Optional[str]) -> Optional[str]:
         if value is None:
             return value
         return _clean_text(value)
 
-    @validator("learningObjectives", "keyTakeaways", each_item=True)
+    @validator("generationStatus")
+    def validate_generation_status(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        status = _clean_text(value).lower()
+        if status not in {"planned", "generated"}:
+            raise ValueError("Generation status must be planned or generated")
+        return status
+
+    @validator("learningObjectives", "keyTakeaways", "learningFlow", each_item=True)
     def validate_learning_list(cls, value: str) -> str:
         value = _clean_text(value)
         if not value:
@@ -346,6 +407,8 @@ class ModuleInput(BaseModel):
     title: str
     description: str
     order: int = Field(ge=1)
+    source: Optional[str] = "manual"
+    generationStatus: Optional[str] = "generated"
     lessons: List[LessonInput] = []
     assessmentTitle: Optional[str] = None
     assessmentQuizId: Optional[str] = None
@@ -356,6 +419,22 @@ class ModuleInput(BaseModel):
         if not value:
             raise ValueError("Field cannot be empty")
         return value
+
+    @validator("source", "generationStatus", "assessmentTitle", "assessmentQuizId", pre=True)
+    def clean_optional_module_text(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        cleaned = _clean_text(value)
+        return cleaned or None
+
+    @validator("generationStatus")
+    def validate_module_generation_status(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        status = _clean_text(value).lower()
+        if status not in {"planned", "generated"}:
+            raise ValueError("Generation status must be planned or generated")
+        return status
 
 
 class MilestoneProjectInput(BaseModel):
@@ -383,8 +462,21 @@ class MilestoneProjectInput(BaseModel):
 
 class CourseCurriculumUpsert(BaseModel):
     overview: str = ""
+    learningFlow: List[str] = []
+    visualAidMarkdown: Optional[str] = ""
     modules: List[ModuleInput] = []
     milestoneProjects: List[MilestoneProjectInput] = []
+
+    @validator("overview", "visualAidMarkdown", pre=True)
+    def clean_curriculum_text(cls, value: Optional[str]) -> str:
+        return _clean_text(value or "")
+
+    @validator("learningFlow", each_item=True)
+    def validate_curriculum_learning_flow(cls, value: str) -> str:
+        value = _clean_text(value)
+        if not value:
+            raise ValueError("Learning flow steps cannot be empty")
+        return value
 
 
 class MediaUploadSignatureRequest(BaseModel):
@@ -496,8 +588,11 @@ class AgentActionCreate(BaseModel):
     artifactId: Optional[str] = None
     courseSlug: Optional[str] = None
     lessonSlug: Optional[str] = None
+    moduleOrder: Optional[int] = Field(default=None, ge=1)
+    questionCount: Optional[int] = Field(default=None, ge=1, le=10)
     targetUserId: Optional[str] = None
     instruction: Optional[str] = ""
+    draftPayload: Optional[dict] = None
 
     @validator("actionType")
     def validate_action_type(cls, value: str) -> str:
@@ -512,3 +607,23 @@ class AgentActionCreate(BaseModel):
             return value
         cleaned = _clean_text(value)
         return cleaned or None
+
+
+class ContentGenerationActionRequest(BaseModel):
+    actionType: str
+    moduleOrder: Optional[int] = Field(default=None, ge=1)
+    questionCount: Optional[int] = Field(default=None, ge=1, le=20)
+    instructions: Optional[str] = ""
+
+    @validator("actionType")
+    def validate_generation_action_type(cls, value: str) -> str:
+        action_type = _clean_text(value).lower()
+        if action_type not in CONTENT_GENERATION_ACTION_TYPES:
+            raise ValueError("Unknown content generation action type")
+        return action_type
+
+    @validator("instructions", pre=True)
+    def clean_generation_instruction(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        return _clean_text(value)

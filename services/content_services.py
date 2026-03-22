@@ -5,6 +5,7 @@ from fastapi import HTTPException, status
 
 from database.database import course_catalog_collection, course_curricula_collection
 from schemas.schemas import CourseCurriculumUpsert
+from services.lesson_library_services import LessonLibraryService
 
 
 def _lesson_supports_playground(course: dict, lesson: dict) -> bool:
@@ -34,6 +35,17 @@ def _default_key_takeaways(lesson: dict) -> list[str]:
     ]
 
 
+def _default_learning_flow(title: str, summary: str) -> list[str]:
+    focus = title or "this lesson"
+    overview = summary or "Understand the idea in context."
+    return [
+        f"Start with the real problem behind {focus}.",
+        f"Break down the core idea: {overview}",
+        "Walk through one concrete example before changing anything.",
+        "Practice with one guided task and reflect on the result.",
+    ]
+
+
 def _default_content_markdown(course: dict, module_title: str, lesson: dict) -> str:
     course_title = course.get("title", "This course")
     lesson_title = lesson.get("title", "This lesson")
@@ -56,6 +68,44 @@ def _default_content_markdown(course: dict, module_title: str, lesson: dict) -> 
             "",
             "## Before moving on",
             "Ask the learner to explain the idea back in their own words and complete the practice task below.",
+        ]
+    )
+
+
+def _default_visual_aid_markdown(lesson: dict) -> str:
+    lesson_title = lesson.get("title", "This lesson")
+    summary = lesson.get("summary", "Understand the concept, then apply it.")
+    return "\n".join(
+        [
+            "## Visual aid",
+            f"`Problem` -> `{lesson_title}` -> `Worked example` -> `Guided practice`",
+            "",
+            f"Use this mental map while studying: {summary}",
+        ]
+    )
+
+
+def _default_curriculum_learning_flow(course: dict) -> list[str]:
+    title = course.get("title", "This course")
+    return [
+        f"Orient the learner around the promise of {title}.",
+        "Move from fundamentals into guided implementation.",
+        "Use checkpoints to confirm understanding before the next module.",
+        "Close with milestone work that combines the key ideas.",
+    ]
+
+
+def _default_curriculum_visual_aid(course: dict, modules: list[dict]) -> str:
+    module_titles = [module.get("title", f"Module {index}") for index, module in enumerate(modules, start=1)]
+    if not module_titles:
+        module_titles = ["Orientation", "Guided practice", "Milestone delivery"]
+    joined = " -> ".join(f"`{title}`" for title in module_titles[:6])
+    return "\n".join(
+        [
+            "## Course roadmap",
+            joined,
+            "",
+            "Follow the sequence from concept, to guided repetition, to checkpoint, then finish with a visible applied result.",
         ]
     )
 
@@ -101,17 +151,63 @@ def _default_playground(course: dict, lesson: dict) -> dict | None:
     }
 
 
+def _lesson_generation_status(lesson: dict) -> str:
+    status = str(lesson.get("generationStatus") or "").strip().lower()
+    source = str(lesson.get("source") or "").strip().lower()
+    if status:
+        return status
+    title = str(lesson.get("title") or "").strip()
+    summary = str(lesson.get("summary") or "").strip()
+    default_summary = f"Work through {title} with a guided explanation and one concrete practice step." if title else ""
+    default_notes = "Imported from an uploaded source document and normalized for the Deveda lesson renderer."
+    content = str(lesson.get("contentMarkdown") or "")
+    objectives = lesson.get("learningObjectives") or []
+    if (
+        source == "agentic_upload"
+        and title
+        and summary == default_summary
+        and str(lesson.get("instructorNotes") or "").strip() == default_notes
+        and "## What this lesson is about" in content
+        and "## Guided practice" in content
+        and len(objectives) == 3
+    ):
+        return "planned"
+    if source in {"scan_plan", "scaffold"}:
+        return "planned"
+    return "generated"
+
+
+def _module_generation_status(module: dict) -> str:
+    status = str(module.get("generationStatus") or "").strip().lower()
+    source = str(module.get("source") or "").strip().lower()
+    if status:
+        return status
+    if source in {"scan_plan", "scaffold"}:
+        return "planned"
+    return "generated"
+
+
+def _lesson_is_published(lesson: dict) -> bool:
+    return _lesson_generation_status(lesson) == "generated"
+
+
 def normalize_lesson(course: dict, module_title: str, lesson: dict) -> dict:
+    is_planned = _lesson_generation_status(lesson) == "planned"
     normalized = {
         **lesson,
+        "libraryLessonSlug": lesson.get("libraryLessonSlug") or lesson.get("slug"),
+        "source": lesson.get("source") or "manual",
+        "generationStatus": lesson.get("generationStatus") or _lesson_generation_status(lesson),
         "quizId": lesson.get("quizId") or None,
         "quizTitle": lesson.get("quizTitle") or None,
-        "learningObjectives": lesson.get("learningObjectives") or _default_learning_objectives(lesson),
-        "keyTakeaways": lesson.get("keyTakeaways") or _default_key_takeaways(lesson),
-        "contentMarkdown": lesson.get("contentMarkdown") or _default_content_markdown(course, module_title, lesson),
-        "practicePrompt": lesson.get("practicePrompt") or _default_practice_prompt(course, lesson),
+        "learningObjectives": lesson.get("learningObjectives") or ([] if is_planned else _default_learning_objectives(lesson)),
+        "keyTakeaways": lesson.get("keyTakeaways") or ([] if is_planned else _default_key_takeaways(lesson)),
+        "learningFlow": lesson.get("learningFlow") or ([] if is_planned else _default_learning_flow(lesson.get("title", ""), lesson.get("summary", ""))),
+        "contentMarkdown": lesson.get("contentMarkdown") or ("" if is_planned else _default_content_markdown(course, module_title, lesson)),
+        "visualAidMarkdown": lesson.get("visualAidMarkdown") if lesson.get("visualAidMarkdown") is not None else ("" if is_planned else _default_visual_aid_markdown(lesson)),
+        "practicePrompt": lesson.get("practicePrompt") if lesson.get("practicePrompt") is not None else ("" if is_planned else _default_practice_prompt(course, lesson)),
         "instructorNotes": lesson.get("instructorNotes") or "",
-        "playground": lesson.get("playground") if lesson.get("playground") is not None else _default_playground(course, lesson),
+        "playground": lesson.get("playground") if lesson.get("playground") is not None or is_planned else _default_playground(course, lesson),
     }
     return normalized
 
@@ -119,6 +215,8 @@ def normalize_lesson(course: dict, module_title: str, lesson: dict) -> dict:
 def normalize_module(course: dict, module: dict) -> dict:
     return {
         **module,
+        "source": module.get("source") or "manual",
+        "generationStatus": module.get("generationStatus") or _module_generation_status(module),
         "assessmentTitle": module.get("assessmentTitle") or None,
         "assessmentQuizId": module.get("assessmentQuizId") or None,
         "lessons": [normalize_lesson(course, module.get("title", "Module"), lesson) for lesson in module.get("lessons", [])],
@@ -126,9 +224,12 @@ def normalize_module(course: dict, module: dict) -> dict:
 
 
 def normalize_curriculum_document(course: dict, document: dict) -> dict:
+    modules = [normalize_module(course, module) for module in document.get("modules", [])]
     return {
         **document,
-        "modules": [normalize_module(course, module) for module in document.get("modules", [])],
+        "learning_flow": document.get("learning_flow") or document.get("learningFlow") or _default_curriculum_learning_flow(course),
+        "visual_aid_markdown": document.get("visual_aid_markdown") or document.get("visualAidMarkdown") or _default_curriculum_visual_aid(course, modules),
+        "modules": modules,
         "milestone_projects": document.get("milestone_projects", []),
     }
 
@@ -138,6 +239,8 @@ def serialize_curriculum(document: dict) -> dict:
         "id": str(document["_id"]),
         "courseSlug": document["course_slug"],
         "overview": document.get("overview", ""),
+        "learningFlow": document.get("learning_flow", []),
+        "visualAidMarkdown": document.get("visual_aid_markdown", ""),
         "modules": document.get("modules", []),
         "milestoneProjects": document.get("milestone_projects", []),
         "updatedAt": document.get("updated_at"),
@@ -155,29 +258,36 @@ def build_curriculum_scaffold(course: dict) -> dict:
     scaffold = {
         "course_slug": slug,
         "overview": f"{title} is organized into guided modules with lesson-level practice, checkpoint quizzes, and milestone projects.",
+        "learning_flow": _default_curriculum_learning_flow(course),
         "modules": [
             {
                 "title": "Foundation Sprint",
                 "description": f"Build the core {category.lower()} skills needed for {difficulty.lower()} progression.",
                 "order": 1,
+                "source": "scaffold",
                 "lessons": [
                     {
-                        "title": f"{title} orientation",
-                        "slug": f"{slug}-orientation",
-                        "summary": "Set expectations, tools, and the learning workflow for this path.",
-                        "durationMinutes": 15,
-                        "contentType": "lesson",
-                    },
-                    {
-                        "title": "First guided implementation",
-                        "slug": f"{slug}-first-build",
-                        "summary": "Ship a small but complete exercise to apply the first module concepts.",
-                        "durationMinutes": 25,
-                        "contentType": "lesson",
-                    },
-                ],
+                "title": f"{title} orientation",
+                "slug": f"{slug}-orientation",
+                "summary": "Set expectations, tools, and the learning workflow for this path.",
+                "durationMinutes": 15,
+                "contentType": "lesson",
+                "source": "scaffold",
+                "generationStatus": "planned",
+            },
+            {
+                "title": "First guided implementation",
+                "slug": f"{slug}-first-build",
+                "summary": "Ship a small but complete exercise to apply the first module concepts.",
+                "durationMinutes": 25,
+                "contentType": "lesson",
+                "source": "scaffold",
+                "generationStatus": "planned",
+            },
+        ],
                 "assessmentTitle": "Module 1 checkpoint quiz",
                 "assessmentQuizId": f"{slug}-module-1-quiz",
+                "generationStatus": "planned",
             }
         ],
         "milestone_projects": [
@@ -194,6 +304,14 @@ def build_curriculum_scaffold(course: dict) -> dict:
                 "completionThreshold": 70,
             }
         ],
+        "visual_aid_markdown": _default_curriculum_visual_aid(
+            course,
+            [
+                {
+                    "title": "Foundation Sprint",
+                }
+            ],
+        ),
         "updated_at": datetime.utcnow(),
         "updated_by": "Deveda Team",
         "is_draft_scaffold": True,
@@ -202,11 +320,22 @@ def build_curriculum_scaffold(course: dict) -> dict:
 
 
 def summarize_curriculum(payload: CourseCurriculumUpsert) -> dict:
-    total_lessons = sum(len(module.lessons) for module in payload.modules)
-    lesson_quizzes = sum(1 for module in payload.modules for lesson in module.lessons if lesson.quizId)
-    assessment_quizzes = sum(1 for module in payload.modules if module.assessmentQuizId)
+    published_modules = [module for module in payload.modules if _module_generation_status(module.dict()) == "generated"]
+    total_lessons = sum(1 for module in payload.modules for lesson in module.lessons if _lesson_is_published(lesson.dict()))
+    lesson_quizzes = sum(
+        1
+        for module in payload.modules
+        for lesson in module.lessons
+        if lesson.quizId and _lesson_is_published(lesson.dict())
+    )
+    assessment_quizzes = sum(1 for module in published_modules if module.assessmentQuizId)
     total_quizzes = lesson_quizzes + assessment_quizzes
-    lesson_duration_minutes = sum(lesson.durationMinutes for module in payload.modules for lesson in module.lessons)
+    lesson_duration_minutes = sum(
+        lesson.durationMinutes
+        for module in payload.modules
+        for lesson in module.lessons
+        if _lesson_is_published(lesson.dict())
+    )
     milestone_duration_minutes = sum(project.estimatedHours * 60 for project in payload.milestoneProjects)
 
     return {
@@ -253,6 +382,8 @@ class ContentService:
         update_data: dict[str, Any] = {
             "course_slug": slug,
             "overview": payload.overview,
+            "learning_flow": payload.learningFlow,
+            "visual_aid_markdown": payload.visualAidMarkdown,
             "modules": normalized_modules,
             "milestone_projects": [project.dict() for project in payload.milestoneProjects],
             "updated_at": datetime.utcnow(),
@@ -282,4 +413,5 @@ class ContentService:
         updated = await course_curricula_collection.find_one({"course_slug": slug})
         normalized_updated = normalize_curriculum_document(course, updated)
         normalized_updated["_id"] = updated["_id"]
+        await LessonLibraryService.sync_course_lessons(course, normalized_updated, updated_by)
         return {"message": "Course curriculum saved", "data": serialize_curriculum(normalized_updated)}

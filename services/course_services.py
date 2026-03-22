@@ -4,7 +4,12 @@ from datetime import datetime
 from typing import Optional, List
 from bson import ObjectId
 from database.database import (
-    course_catalog_collection, 
+    achievements_collection,
+    content_intake_sessions_collection,
+    course_catalog_collection,
+    course_curricula_collection,
+    quiz_progress_collection,
+    quiz_questions_collection,
     user_courses_collection,
     user_profiles_collection,
     users_collection
@@ -12,7 +17,7 @@ from database.database import (
 from schemas.schemas import CourseEnroll, CourseCatalogCreate, CourseProgressUpdate
 from services.auth_services import validate_object_id, serialize_user
 from services.achievement_services import AchievementService
-from services.seed_services import ensure_course_catalog_seeded
+from services.lesson_library_services import LessonLibraryService
 
 CODING_CATEGORIES = {"Frontend Development", "Backend Development", "Systems Design"}
 
@@ -34,6 +39,8 @@ def serialize_course(course: dict) -> dict:
         "difficulty": course.get("difficulty", "Beginner"),
         "progress": course["progress"],
         "completed": course["completed"],
+        "completedLessonSlugs": course.get("completed_lesson_slugs", []),
+        "currentLessonSlug": course.get("current_lesson_slug"),
         "lastAccessed": course["last_accessed"],
         "enrolledAt": course.get("enrolled_at"),
     }
@@ -57,13 +64,28 @@ def serialize_course_catalog(course: dict) -> dict:
         "createdAt": course.get("created_at"),
     }
 
+
+def _collect_curriculum_quiz_ids(curriculum: Optional[dict], course_slug: str) -> set[str]:
+    quiz_ids = {f"{course_slug}-imported-quiz"}
+    if not curriculum:
+        return quiz_ids
+
+    for module in curriculum.get("modules", []):
+        assessment_quiz_id = str(module.get("assessmentQuizId") or "").strip()
+        if assessment_quiz_id:
+            quiz_ids.add(assessment_quiz_id)
+        for lesson in module.get("lessons", []):
+            lesson_quiz_id = str(lesson.get("quizId") or "").strip()
+            if lesson_quiz_id:
+                quiz_ids.add(lesson_quiz_id)
+    return quiz_ids
+
 class CourseService:
     
     @staticmethod
     async def enroll_course(user_id: str, payload: CourseEnroll):
         oid = validate_object_id(user_id)
         await ensure_student_account(oid)
-        await ensure_course_catalog_seeded()
 
         # Check if course exists in catalog
         catalog_course = await course_catalog_collection.find_one({"slug": payload.courseSlug})
@@ -85,6 +107,8 @@ class CourseService:
             "difficulty": catalog_course.get("difficulty", payload.difficulty),
             "progress": 0,
             "completed": False,
+            "completed_lesson_slugs": [],
+            "current_lesson_slug": None,
             "last_accessed": datetime.utcnow(),
             "enrolled_at": datetime.utcnow(),
         }
@@ -161,9 +185,13 @@ class CourseService:
             "progress": payload.progress,
             "last_accessed": datetime.utcnow(),
         }
-        
+
         if payload.completed is not None:
             update_data["completed"] = payload.completed
+        if payload.completedLessonSlugs is not None:
+            update_data["completed_lesson_slugs"] = payload.completedLessonSlugs
+        if "currentLessonSlug" in payload.__fields_set__:
+            update_data["current_lesson_slug"] = payload.currentLessonSlug
 
         await user_courses_collection.update_one(
             {"_id": course["_id"]},
@@ -225,7 +253,6 @@ class CourseCatalogService:
         difficulty: Optional[str] = None,
         search: Optional[str] = None
     ):
-        await ensure_course_catalog_seeded()
         query = {"category": {"$in": list(CODING_CATEGORIES)}}
         
         if category:
@@ -251,7 +278,6 @@ class CourseCatalogService:
     @staticmethod
     async def get_course_by_slug(slug: str):
         """Get a single course by its slug"""
-        await ensure_course_catalog_seeded()
         course = await course_catalog_collection.find_one({"slug": slug})
         if not course or course.get("category") not in CODING_CATEGORIES:
             raise HTTPException(404, {"message": "Course not found"})
@@ -303,29 +329,36 @@ class CourseCatalogService:
     @staticmethod
     async def delete_course_catalog(slug: str):
         """Delete a course from the catalog"""
-        result = await course_catalog_collection.delete_one({"slug": slug})
-        
-        if result.deleted_count == 0:
+        course = await course_catalog_collection.find_one({"slug": slug})
+        if not course:
             raise HTTPException(404, {"message": "Course not found"})
-        
-        # Also delete any user enrollments for this course
+
+        curriculum = await course_curricula_collection.find_one({"course_slug": slug})
+        quiz_ids = _collect_curriculum_quiz_ids(curriculum, slug)
+
+        await course_catalog_collection.delete_one({"slug": slug})
+        await course_curricula_collection.delete_many({"course_slug": slug})
         await user_courses_collection.delete_many({"course_slug": slug})
-        
-        # Remove from user profiles
         await user_profiles_collection.update_many(
             {"registered_courses": slug},
             {"$pull": {"registered_courses": slug}}
         )
+        await quiz_progress_collection.delete_many({"course_slug": slug})
+        await achievements_collection.delete_many({"course_slug": slug})
+        await content_intake_sessions_collection.delete_many({"course_slug": slug})
+        await LessonLibraryService.detach_course(slug)
+
+        if quiz_ids:
+            await quiz_questions_collection.delete_many({"quiz_id": {"$in": list(quiz_ids)}})
         
         return {
-            "message": "Course deleted successfully",
-            "data": None,
+            "message": "Course and related curriculum data deleted successfully",
+            "data": {"slug": slug},
         }
     
     @staticmethod
     async def get_course_catalog_stats():
         """Get statistics about the course catalog"""
-        await ensure_course_catalog_seeded()
         catalog_query = {"category": {"$in": list(CODING_CATEGORIES)}}
         total_courses = await course_catalog_collection.count_documents(catalog_query)
         

@@ -3,7 +3,7 @@ from datetime import datetime
 from bson import ObjectId
 from fastapi import HTTPException, status
 
-from database.database import quiz_progress_collection, quiz_questions_collection, user_courses_collection, users_collection
+from database.database import course_curricula_collection, quiz_progress_collection, quiz_questions_collection, user_courses_collection, users_collection
 from schemas.schemas import QuestionCreate, QuizAttemptCreate
 from services.achievement_services import AchievementService
 from services.auth_services import validate_object_id
@@ -40,6 +40,34 @@ def serialize_quiz_attempt(attempt: dict) -> dict:
         "passed": attempt["passed"],
         "attemptedAt": attempt["attempted_at"],
     }
+
+
+def _fallback_quiz_title(quiz_id: str) -> str:
+    return quiz_id.replace("-", " ").replace("_", " ").title()
+
+
+async def _quiz_catalog_metadata() -> dict[str, dict[str, str | None]]:
+    metadata: dict[str, dict[str, str | None]] = {}
+    cursor = course_curricula_collection.find({}, {"course_slug": 1, "modules": 1})
+    async for curriculum in cursor:
+        course_slug = curriculum.get("course_slug")
+        for module in curriculum.get("modules", []):
+            assessment_quiz_id = str(module.get("assessmentQuizId") or "").strip()
+            if assessment_quiz_id and assessment_quiz_id not in metadata:
+                metadata[assessment_quiz_id] = {
+                    "title": str(module.get("assessmentTitle") or "").strip() or _fallback_quiz_title(assessment_quiz_id),
+                    "courseSlug": course_slug,
+                }
+
+            for lesson in module.get("lessons", []):
+                lesson_quiz_id = str(lesson.get("quizId") or "").strip()
+                if lesson_quiz_id and lesson_quiz_id not in metadata:
+                    lesson_title = str(lesson.get("quizTitle") or "").strip() or f"{str(lesson.get('title') or 'Lesson').strip()} assessment"
+                    metadata[lesson_quiz_id] = {
+                        "title": lesson_title,
+                        "courseSlug": course_slug,
+                    }
+    return metadata
 
 
 async def ensure_student_account(user_id: ObjectId) -> dict:
@@ -132,15 +160,23 @@ class QuizService:
 
     @staticmethod
     async def get_quizzes():
+        metadata = await _quiz_catalog_metadata()
         quizzes = []
         quiz_ids = await quiz_questions_collection.distinct("quiz_id")
-        for quiz_id in sorted(quiz_ids):
-            question_count = await quiz_questions_collection.count_documents({"quiz_id": quiz_id, "is_active": True})
+        for quiz_id in sorted(quiz_ids, key=lambda item: (metadata.get(item, {}).get("title") or _fallback_quiz_title(item)).lower()):
+            question_count = 0
+            duration = 0
+            async for question in quiz_questions_collection.find({"quiz_id": quiz_id, "is_active": True}, {"time_limit": 1}):
+                question_count += 1
+                duration += int(question.get("time_limit") or 0)
+            quiz_meta = metadata.get(quiz_id, {})
             quizzes.append(
                 {
                     "id": quiz_id,
-                    "title": quiz_id.replace("-", " ").replace("_", " ").title(),
+                    "title": quiz_meta.get("title") or _fallback_quiz_title(quiz_id),
+                    "courseSlug": quiz_meta.get("courseSlug"),
                     "totalQuestions": question_count,
+                    "duration": duration,
                 }
             )
         return {"message": "Quizzes fetched", "data": quizzes}

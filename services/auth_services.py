@@ -26,7 +26,7 @@ from schemas.schemas import (
     UserStatusUpdate,
     UserUpdate,
 )
-from services.seed_services import ensure_course_catalog_seeded, seed_user_data
+from services.seed_services import initialize_user_profile
 
 auth_scheme = HTTPBearer(auto_error=False)
 JWT_SECRET = os.getenv("JWT_SECRET") or os.getenv("SECRET_KEY") or "deveda-local-dev-secret"
@@ -150,6 +150,14 @@ async def get_current_user(
     return user
 
 
+async def get_optional_user(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(auth_scheme),
+) -> Optional[dict]:
+    if credentials is None:
+        return None
+    return await get_current_user(credentials)
+
+
 def require_roles(*roles: str):
     allowed = {role.title() for role in roles}
 
@@ -233,8 +241,7 @@ class AuthService:
         result = await users_collection.insert_one(user)
         user["_id"] = result.inserted_id
 
-        await ensure_course_catalog_seeded()
-        await seed_user_data(user["_id"], user["role"])
+        await initialize_user_profile(user["_id"], user["role"])
 
         return build_auth_response(user, "Account created successfully")
 
@@ -271,7 +278,7 @@ class AuthService:
         result = await users_collection.insert_one(user)
         user["_id"] = result.inserted_id
 
-        await seed_user_data(user["_id"], user["role"])
+        await initialize_user_profile(user["_id"], user["role"])
 
         return build_auth_response(user, "Admin account created successfully")
 
@@ -356,8 +363,7 @@ class UserService:
         result = await users_collection.insert_one(user)
         user["_id"] = result.inserted_id
 
-        await ensure_course_catalog_seeded()
-        await seed_user_data(user["_id"], payload.role)
+        await initialize_user_profile(user["_id"], payload.role)
 
         return {"message": "User created successfully", "data": serialize_user(user)}
 

@@ -1,12 +1,12 @@
 
 
-# 🚀 Deveda Backend API (FastAPI + MongoDB + Docker)
+#  Deveda Backend API (FastAPI + MongoDB + Docker)
 
 This project is a **Dockerized FastAPI backend** with **MongoDB**, designed for local development and production-ready deployment using **Docker Compose**.
 
 ---
 
-## 🧱 Tech Stack
+##  Tech Stack
 
 * **FastAPI** — Backend framework
 * **MongoDB** — Database
@@ -16,7 +16,7 @@ This project is a **Dockerized FastAPI backend** with **MongoDB**, designed for 
 
 ---
 
-## 📁 Project Structure
+##  Project Structure
 
 ```text
 Deveda-be/
@@ -54,7 +54,7 @@ docker compose version
 
 ---
 
-## 🔐 Environment Variables
+##  Environment Variables
 
 Create a `.env` file in the project root:
 
@@ -68,7 +68,7 @@ DB_NAME=auth_db
 
 ---
 
-## 🐳 Running the Project (Docker Compose)
+##  Running the Project (Docker Compose)
 
 From the project root:
 
@@ -88,10 +88,10 @@ This will:
 ## 🌐 Accessing the Application
 
 * **API Base URL**
-  👉 [http://localhost:8000](http://localhost:8000)
+   [http://localhost:8000](http://localhost:8000)
 
 * **Swagger Docs**
-  👉 [http://localhost:8000/docs](http://localhost:8000/docs)
+   [http://localhost:8000/docs](http://localhost:8000/docs)
 
 * **MongoDB**
 
@@ -118,7 +118,7 @@ This ensures:
 
 ---
 
-## 🧠 How Container Networking Works
+##  How Container Networking Works
 
 ```text
 Docker Network
@@ -135,7 +135,7 @@ Docker Network
 
 ---
 
-## 🛑 Stopping the Containers
+##  Stopping the Containers
 
 ```bash
 docker compose down
@@ -149,7 +149,7 @@ docker compose down -v
 
 ---
 
-## 🧪 Common Commands
+##  Common Commands
 
 Rebuild everything:
 
@@ -171,7 +171,7 @@ docker compose logs -f
 
 ---
 
-## 🚀 Deployment Notes
+## Deployment Notes
 
 This setup is compatible with:
 
@@ -184,7 +184,7 @@ The same Docker image can be reused without modification.
 
 ---
 
-## ✅ Key Takeaways
+##  Key Takeaways
 
 * No local MongoDB installation needed
 * No Python virtualenv required
@@ -193,7 +193,7 @@ The same Docker image can be reused without modification.
 
 ---
 
-## 📌 Future Improvements
+##  Future Improvements
 
 * JWT authentication
 * Role-based access control

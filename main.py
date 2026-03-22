@@ -1,8 +1,9 @@
 from typing import Optional
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, File, Form, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
+from database.database import ensure_indexes
 from schemas.schemas import (
     AgentActionCreate,
     AgentApprovalUpdate,
@@ -13,6 +14,7 @@ from schemas.schemas import (
     CourseCurriculumUpsert,
     CourseEnroll,
     CourseProgressUpdate,
+    ContentGenerationActionRequest,
     MediaUploadSignatureRequest,
     PasswordChangeRequest,
     PrivateAdminCreateRequest,
@@ -24,7 +26,7 @@ from schemas.schemas import (
     UserStatusUpdate,
     UserUpdate,
 )
-from services import achievement_services, admin_services, agent_services, auth_services, content_services, course_services, media_services, quiz_services
+from services import achievement_services, admin_services, agent_services, auth_services, content_intake_services, content_services, course_seed_services, course_services, lesson_library_services, media_services, quiz_services
 
 openapi_tags = [
     {
@@ -50,6 +52,14 @@ openapi_tags = [
     {
         "name": "Curriculum",
         "description": "Curriculum structure endpoints for lessons, modules, and milestone projects.",
+    },
+    {
+        "name": "Lesson Library",
+        "description": "Reusable lesson records that surface course-linked sub-lessons and access status.",
+    },
+    {
+        "name": "Content Intake",
+        "description": "Upload-first content ingestion endpoints for agent-assisted course, lesson, and quiz generation.",
     },
     {
         "name": "Quizzes",
@@ -90,6 +100,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.on_event("startup")
+async def initialize_database_state():
+    await ensure_indexes()
+    await course_seed_services.ensure_frontend_blank_file_milestone_seed()
 
 
 @app.get(
@@ -185,7 +201,7 @@ async def get_all_users(current_user: dict = Depends(auth_services.require_roles
     status_code=201,
     tags=["Users"],
     summary="Create a user",
-    description="Creates a user account as an admin action and seeds the user's initial platform data.",
+    description="Creates a user account as an admin action and initializes the profile and account records.",
 )
 async def create_user(
     payload: UserCreate,
@@ -432,6 +448,16 @@ async def get_course_curriculum(slug: str):
     return await content_services.ContentService.get_course_curriculum(slug)
 
 
+@app.get(
+    "/lessons/library",
+    tags=["Lesson Library"],
+    summary="List lesson library items",
+    description="Returns published course-linked sub-lessons and whether the current user can open them from an enrolled course.",
+)
+async def get_lesson_library(current_user: Optional[dict] = Depends(auth_services.get_optional_user)):
+    return await lesson_library_services.LessonLibraryService.get_library(current_user)
+
+
 @app.put(
     "/courses/catalog/{slug}/curriculum",
     tags=["Curriculum"],
@@ -445,6 +471,82 @@ async def update_course_curriculum(
 ):
     updated_by = f"{current_user.get('first_name', '')} {current_user.get('last_name', '')}".strip() or current_user["email"]
     return await content_services.ContentService.upsert_course_curriculum(slug, payload, updated_by)
+
+
+@app.post(
+    "/content/intake",
+    tags=["Content Intake"],
+    summary="Ingest uploaded learning content",
+    description="Uploads a source document and lets the backend parse it into course content, lesson content, or question-bank records using the agentic ingestion workflow.",
+)
+async def ingest_learning_content(
+    intent: str = Form(...),
+    courseSlug: Optional[str] = Form(None),
+    instructions: str = Form(""),
+    sourceFile: UploadFile = File(...),
+    current_user: dict = Depends(auth_services.require_roles("Admin", "Instructor")),
+):
+    return await content_intake_services.ContentIntakeService.ingest_upload(
+        current_user,
+        intent=intent,
+        source_file=sourceFile,
+        course_slug=courseSlug,
+        instructions=instructions,
+    )
+
+
+@app.post(
+    "/content/intake/sessions/upload",
+    tags=["Content Intake"],
+    summary="Upload and scan source material",
+    description="Stores the uploaded source, parses it, and creates a staged content-generation session with a proposed course plan before any module generation is performed.",
+)
+async def upload_content_generation_session(
+    courseSlug: Optional[str] = Form(None),
+    instructions: str = Form(""),
+    sourceFile: UploadFile = File(...),
+    current_user: dict = Depends(auth_services.require_roles("Admin", "Instructor")),
+):
+    return await content_intake_services.ContentIntakeService.start_generation_session(
+        current_user,
+        source_file=sourceFile,
+        course_slug=courseSlug,
+        instructions=instructions,
+    )
+
+
+@app.get(
+    "/content/intake/sessions/{session_id}",
+    tags=["Content Intake"],
+    summary="Get staged content-generation session",
+    description="Returns the stored scan plan, linked course state, and generated progress for a previously uploaded content-generation session.",
+)
+async def get_content_generation_session(
+    session_id: str,
+    current_user: dict = Depends(auth_services.require_roles("Admin", "Instructor")),
+):
+    return await content_intake_services.ContentIntakeService.get_generation_session(session_id, current_user)
+
+
+@app.post(
+    "/content/intake/sessions/{session_id}/actions",
+    tags=["Content Intake"],
+    summary="Run a staged generation action",
+    description="Runs one explicit instructor-approved generation step such as creating a course shell, generating one module, or generating questions for a module.",
+)
+async def run_content_generation_action(
+    session_id: str,
+    payload: ContentGenerationActionRequest,
+    current_user: dict = Depends(auth_services.require_roles("Admin", "Instructor")),
+):
+    return await content_intake_services.ContentIntakeService.run_generation_action(
+        session_id,
+        current_user,
+        action_type=payload.actionType,
+        module_order=payload.moduleOrder,
+        question_count=payload.questionCount,
+        instructions=payload.instructions or "",
+    )
 
 
 @app.get(

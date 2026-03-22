@@ -4,17 +4,17 @@ services:
     build: .
     container_name: deveda-be
     ports:
-      - "8000:8000"
+      - "${API_PORT:-8000}:8000"
     env_file:
       - .env
     depends_on:
       - mongo
 
   mongo:
-    image: mongo:7
+    image: public.ecr.aws/docker/library/mongo:7
     container_name: deveda_db
     ports:
-      - "27017:27017"
+      - "${MONGO_PORT:-27017}:27017"
     volumes:
       - mongo_data:/data/db
 
