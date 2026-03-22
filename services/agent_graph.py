@@ -298,6 +298,8 @@ class AgentGraphRuntime:
         context, _ = await agent._build_context_bundle(assignment, context_payload)
         if isinstance(payload.draftPayload, dict):
             context["draftPayload"] = payload.draftPayload
+        if payload.lessonSlug or assignment.get("lesson_slug"):
+            context["requestedLessonSlug"] = payload.lessonSlug or assignment.get("lesson_slug")
         return {
             "context": context,
             "steps": _append_step(state, "load_context"),

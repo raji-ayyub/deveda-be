@@ -2757,7 +2757,7 @@ async def _create_lesson_content_plan_artifact(
     thread_id: Optional[ObjectId] = None,
 ) -> Optional[dict]:
     course = context.get("course")
-    lesson = context.get("lesson")
+    lesson = context.get("lesson") or _resolve_working_lesson_context(context)
     if not course or not lesson:
         return None
 
@@ -2782,7 +2782,7 @@ async def _create_generated_lesson_content_artifact(
     thread_id: Optional[ObjectId] = None,
 ) -> Optional[dict]:
     course = context.get("course")
-    lesson = context.get("lesson")
+    lesson = context.get("lesson") or _resolve_working_lesson_context(context)
     if not course or not lesson:
         return None
 
@@ -2819,7 +2819,11 @@ async def _create_course_content_plan_artifact(
     if not course:
         return None
 
-    payload = _build_course_content_plan_payload(course, context.get("curriculum"), instruction)
+    working_curriculum = _resolve_working_curriculum(
+        context,
+        context.get("draftPayload") if isinstance(context.get("draftPayload"), dict) else None,
+    )
+    payload = _build_course_content_plan_payload(course, working_curriculum, instruction)
     summary = f"Planned the background curriculum and lesson generation workflow for {course['title']}."
     return await _store_artifact(
         assignment,
@@ -2843,8 +2847,12 @@ async def _create_generated_course_content_artifact(
     if not course:
         return None
 
-    plan_payload = _build_course_content_plan_payload(course, context.get("curriculum"), instruction)
-    payload = _build_generated_course_payload(course, context.get("curriculum"), instruction, plan_payload=plan_payload)
+    working_curriculum = _resolve_working_curriculum(
+        context,
+        context.get("draftPayload") if isinstance(context.get("draftPayload"), dict) else None,
+    )
+    plan_payload = _build_course_content_plan_payload(course, working_curriculum, instruction)
+    payload = _build_generated_course_payload(course, working_curriculum, instruction, plan_payload=plan_payload)
     summary = f"Generated a course outline for {course['title']} that is ready for module-by-module expansion."
     return await _store_artifact(
         assignment,
@@ -2885,6 +2893,45 @@ def _resolve_working_curriculum(context: dict, draft_payload: Optional[dict]) ->
             "milestoneProjects": scaffold.get("milestone_projects", []),
         }
     return {"courseSlug": "", "overview": "", "modules": [], "milestoneProjects": []}
+
+
+def _resolve_working_lesson_context(context: dict) -> Optional[dict]:
+    draft_payload = context.get("draftPayload") if isinstance(context.get("draftPayload"), dict) else None
+    if isinstance(draft_payload, dict):
+        draft_lesson = draft_payload.get("lesson")
+        if isinstance(draft_lesson, dict):
+            raw_module_order = draft_lesson.get("moduleOrder", draft_payload.get("moduleOrder", 1))
+            try:
+                module_order = max(int(raw_module_order or 1), 1)
+            except (TypeError, ValueError):
+                module_order = 1
+            return {
+                **draft_lesson,
+                "moduleTitle": str(draft_lesson.get("moduleTitle", draft_payload.get("moduleTitle", "Module"))).strip() or "Module",
+                "moduleOrder": module_order,
+            }
+
+    working_curriculum = _resolve_working_curriculum(context, draft_payload)
+    requested_lesson_slug = str(context.get("requestedLessonSlug", "") or "").strip()
+    if not requested_lesson_slug:
+        return None
+
+    for module_index, module in enumerate(working_curriculum.get("modules", []), start=1):
+        lessons = module.get("lessons", []) if isinstance(module.get("lessons"), list) else []
+        for lesson in lessons:
+            if str(lesson.get("slug", "")).strip() == requested_lesson_slug:
+                raw_module_order = module.get("order", module_index)
+                try:
+                    module_order = max(int(raw_module_order or module_index), 1)
+                except (TypeError, ValueError):
+                    module_order = module_index
+                return {
+                    **lesson,
+                    "moduleTitle": str(module.get("title", "Module")).strip() or "Module",
+                    "moduleOrder": module_order,
+                }
+
+    return None
 
 
 def _build_fallback_module_payload(course: dict, module: dict, module_order: int, instruction: str) -> dict:
@@ -3093,7 +3140,7 @@ async def _create_lesson_content_suggestion_artifact(
     thread_id: Optional[ObjectId] = None,
 ) -> Optional[dict]:
     course = context.get("course")
-    lesson = context.get("lesson")
+    lesson = context.get("lesson") or _resolve_working_lesson_context(context)
     if not course or not lesson:
         return None
 

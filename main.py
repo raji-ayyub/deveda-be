@@ -106,6 +106,7 @@ app.add_middleware(
 async def initialize_database_state():
     await ensure_indexes()
     await course_seed_services.ensure_frontend_blank_file_milestone_seed()
+    await course_seed_services.ensure_frontend_development_beginner_seed()
 
 
 @app.get(
