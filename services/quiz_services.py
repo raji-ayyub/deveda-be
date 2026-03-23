@@ -253,3 +253,19 @@ class QuizService:
         async for attempt in cursor:
             attempts.append(serialize_quiz_attempt(attempt))
         return {"message": "Quiz attempts fetched", "data": attempts}
+
+    @staticmethod
+    async def delete_user_quiz_attempt(user_id: str, attempt_id: str):
+        user_oid = validate_object_id(user_id)
+        attempt_oid = validate_object_id(attempt_id)
+        await ensure_student_account(user_oid)
+
+        attempt = await quiz_progress_collection.find_one({"_id": attempt_oid, "user_id": user_oid})
+        if not attempt:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"message": "Quiz attempt not found"},
+            )
+
+        await quiz_progress_collection.delete_one({"_id": attempt_oid})
+        return {"message": "Quiz attempt deleted", "data": True}

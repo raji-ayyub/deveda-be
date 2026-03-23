@@ -680,6 +680,21 @@ async def get_user_quiz_attempts(
     return await quiz_services.QuizService.get_user_quiz_attempts(user_id)
 
 
+@app.delete(
+    "/users/{user_id}/quizzes/{attempt_id}",
+    tags=["Quizzes"],
+    summary="Delete user quiz attempt",
+    description="Deletes a specific quiz attempt record for a given user.",
+)
+async def delete_user_quiz_attempt(
+    user_id: str,
+    attempt_id: str,
+    current_user: dict = Depends(auth_services.get_current_user),
+):
+    auth_services.ensure_self_or_roles(current_user, user_id, {"Admin", "Instructor"})
+    return await quiz_services.QuizService.delete_user_quiz_attempt(user_id, attempt_id)
+
+
 @app.get(
     "/stats",
     tags=["Analytics"],
