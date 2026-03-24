@@ -2035,18 +2035,127 @@ def _progress_analyst_reply(message: str, context: dict) -> str:
 def _lesson_tutor_reply(message: str, context: dict) -> str:
     course = context.get("course")
     lesson = context.get("lesson")
+    normalized_message = _normalize_text(message)
+    lesson_title = lesson.get("title") if lesson else "this lesson"
+    course_title = course.get("title") if course else "this course"
+    lesson_focus = lesson.get("summary") if lesson else None
+    topic_text = _normalize_text(f"{lesson.get('title', '')} {lesson.get('summary', '')}" if lesson else "")
+
+    if normalized_message in {"hi", "hello", "hey", "good morning", "good afternoon", "good evening"}:
+        if lesson:
+            return (
+                f"Hi, I’m Nexa. I’m here with you in `{lesson_title}` from `{course_title}`.\n\n"
+                f"If you want, tell me what feels unclear and we can unpack it together in a simple way."
+            )
+        return "Hi, I’m Nexa. Tell me what feels confusing and we can work through it together."
+
+    if any(
+        phrase in normalized_message
+        for phrase in [
+            "run button",
+            "press run",
+            "not updating",
+            "not showing",
+            "isnt showing",
+            "isnt updating",
+            "preview",
+            "output",
+            "result",
+        ]
+    ):
+        if "array" in topic_text or "object" in topic_text or "render" in topic_text or "collection" in topic_text:
+            return (
+                "It sounds like the code is running, but the page is not being re-rendered in the way you expect.\n\n"
+                "In lessons like this, the most common cause is that the data changes in JavaScript, but the rendering step never writes the updated markup back into the page. "
+                "Another common cause is that the HTML target and the JavaScript selector do not match, so the code updates a missing element.\n\n"
+                "A calm way to narrow it down is to compare three pieces together: the element in the HTML, the function that turns the array into markup, and the line that places that markup into the page.\n\n"
+                "If you paste the HTML, CSS, and JS here, I can help trace the exact point where the update stops."
+            )
+
+        if "flexbox" in topic_text or "align" in topic_text:
+            return (
+                "That usually means the layout rules are not landing on the element that controls the layout.\n\n"
+                "With Flexbox, the parent container normally carries `display: flex`, and properties like `justify-content` and `align-items` affect how the children sit inside it. "
+                "If those styles are applied to a child instead of the parent, pressing Run can make the page feel unchanged.\n\n"
+                "If you share the HTML and CSS you have right now, I can help check which element is acting as the flex container."
+            )
+
+        return (
+            "It sounds like the code is executing, but the visible result is not changing yet.\n\n"
+            "When that happens, it often helps to compare the element you expect to change, the selector or variable pointing to it, and the line that updates the page after your data or logic changes.\n\n"
+            "If you paste the code here, I can help narrow it down with you step by step."
+        )
+
+    if any(phrase in normalized_message for phrase in ["show me", "example", "sample"]):
+        if "array" in topic_text or "object" in topic_text or "render" in topic_text or "collection" in topic_text:
+            return (
+                "A small example may help here:\n\n"
+                "```js\n"
+                "const students = [\n"
+                "  { name: 'Ada', score: 92 },\n"
+                "  { name: 'Tomi', score: 88 },\n"
+                "];\n\n"
+                "const list = document.querySelector('#student-list');\n"
+                "list.innerHTML = students\n"
+                "  .map((student) => `<li>${student.name} - ${student.score}</li>`)\n"
+                "  .join('');\n"
+                "```\n\n"
+                "The array holds many records, each object holds one record, and `map()` turns each record into repeated HTML."
+            )
+
+        if "flexbox" in topic_text or "align" in topic_text:
+            return (
+                "Here is a compact Flexbox example:\n\n"
+                "```html\n"
+                "<div class=\"toolbar\">\n"
+                "  <span>Logo</span>\n"
+                "  <button>Profile</button>\n"
+                "</div>\n"
+                "```\n\n"
+                "```css\n"
+                ".toolbar {\n"
+                "  display: flex;\n"
+                "  justify-content: space-between;\n"
+                "  align-items: center;\n"
+                "}\n"
+                "```\n\n"
+                "The key idea is that Flexbox lives on the parent, and the children respond to that shared layout rule."
+            )
+
+    if any(phrase in normalized_message for phrase in ["what is", "how does", "why", "explain", "dont understand", "do not understand", "confused"]):
+        if "array" in topic_text or "object" in topic_text or "render" in topic_text or "collection" in topic_text:
+            return (
+                "In this lesson, arrays and objects are doing two different jobs.\n\n"
+                "An array keeps the whole collection together. An object keeps one item's details together. "
+                "Rendering means taking each object in the array and turning it into one repeated piece of interface, like a card or list row.\n\n"
+                "A useful mental model is: array = shelf, object = one box on the shelf, rendered HTML = the label you place on screen for each box."
+            )
+
+        if "flexbox" in topic_text or "align" in topic_text:
+            return (
+                "Flexbox is a layout system that gives the parent container responsibility for arranging its children.\n\n"
+                "Instead of positioning each child one by one, the parent decides direction, spacing, and alignment. "
+                "That is why `display: flex` usually matters more on the wrapper than on the items inside it.\n\n"
+                "A short way to think about it is: the parent sets the rules, the children line up according to those rules."
+            )
+
+        if lesson_focus:
+            return (
+                f"Here is the core idea in simpler words:\n\n{lesson_focus}\n\n"
+                "If you want, we can make it even smaller by focusing on one line of code or one term that feels fuzzy."
+            )
 
     if lesson:
         return (
-            f"I’m Nexa, here to support you inside `{lesson['title']}` from `{course['title']}`.\n\n"
+            f"I’m Nexa, here with you inside `{lesson['title']}` from `{course['title']}`.\n\n"
             f"Current focus: {lesson.get('summary', 'This lesson builds one core skill in manageable steps.')} "
-            f"A gentle way to look at it is like learning balance on a bicycle: you notice the motion first, try a small movement, and confidence grows from repetition.\n\n"
+            f"We can keep it practical and take only the part you need right now.\n\n"
             f"If it helps, we can take this in one of these ways:\n"
             f"1. A plain-language explanation.\n"
             f"2. A small example with code.\n"
             f"3. A simple analogy or story.\n"
             f"4. A walkthrough of one confusing part.\n\n"
-            f"Send the part that feels unclear, and I’ll meet you there without rushing ahead."
+            f"Tell me what feels unclear, and I’ll meet you there without rushing ahead."
         )
 
     if course:
@@ -3576,8 +3685,11 @@ class AgentService:
                 current_user,
                 history,
             )
+            fallback_context = graph_result.get("context")
+            if fallback_context is None:
+                fallback_context, _ = await _build_context_bundle(assignment, payload)
             ai_reply = graph_result.get("reply") or {
-                "content": _fallback_reply(assignment["agent_type"], payload.message, {}),
+                "content": _fallback_reply(assignment["agent_type"], payload.message, fallback_context),
                 "metadata": {"provider": "deveda-fallback", "orchestrator": "langgraph"},
             }
 
