@@ -6,7 +6,9 @@ from typing import Optional, Set
 import bcrypt
 import jwt
 from bson import ObjectId
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, Response, status
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from passlib.hash import pbkdf2_sha256
 
@@ -27,12 +29,35 @@ from schemas.schemas import (
     UserUpdate,
 )
 from services.seed_services import initialize_user_profile
+from services.pagination_utils import build_pagination, normalize_pagination
 
 auth_scheme = HTTPBearer(auto_error=False)
 JWT_SECRET = os.getenv("JWT_SECRET") or os.getenv("SECRET_KEY") or "deveda-local-dev-secret"
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "10080"))
 ADMIN_SETUP_SECRET = os.getenv("ADMIN_SETUP_SECRET", "")
+AUTH_COOKIE_NAME = os.getenv("AUTH_COOKIE_NAME", "deveda_session")
+AUTH_COOKIE_DOMAIN = (os.getenv("AUTH_COOKIE_DOMAIN") or "").strip() or None
+AUTH_COOKIE_PATH = os.getenv("AUTH_COOKIE_PATH", "/")
+
+
+def _read_bool_env(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _read_cookie_samesite() -> str:
+    value = (os.getenv("AUTH_COOKIE_SAMESITE") or "lax").strip().lower()
+    if value not in {"lax", "strict", "none"}:
+        return "lax"
+    return value
+
+
+AUTH_COOKIE_SAMESITE = _read_cookie_samesite()
+AUTH_COOKIE_SECURE = _read_bool_env("AUTH_COOKIE_SECURE", default=AUTH_COOKIE_SAMESITE == "none")
+AUTH_COOKIE_MAX_AGE_SECONDS = ACCESS_TOKEN_EXPIRE_MINUTES * 60
 
 
 def hash_password(password: str) -> str:
@@ -111,17 +136,63 @@ def build_auth_response(user: dict, message: str) -> dict:
     }
 
 
-async def get_current_user(
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(auth_scheme),
-) -> dict:
-    if credentials is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"message": "Authentication required"},
-        )
+def _set_auth_cookie(response: Response, token: str) -> None:
+    response.set_cookie(
+        key=AUTH_COOKIE_NAME,
+        value=token,
+        httponly=True,
+        secure=AUTH_COOKIE_SECURE,
+        samesite=AUTH_COOKIE_SAMESITE,
+        max_age=AUTH_COOKIE_MAX_AGE_SECONDS,
+        expires=AUTH_COOKIE_MAX_AGE_SECONDS,
+        path=AUTH_COOKIE_PATH,
+        domain=AUTH_COOKIE_DOMAIN,
+    )
 
+
+def clear_auth_cookie(response: Response) -> None:
+    response.set_cookie(
+        key=AUTH_COOKIE_NAME,
+        value="",
+        httponly=True,
+        secure=AUTH_COOKIE_SECURE,
+        samesite=AUTH_COOKIE_SAMESITE,
+        max_age=0,
+        expires=0,
+        path=AUTH_COOKIE_PATH,
+        domain=AUTH_COOKIE_DOMAIN,
+    )
+
+
+def attach_auth_cookie(payload: dict, status_code: int = status.HTTP_200_OK) -> JSONResponse:
+    response = JSONResponse(status_code=status_code, content=jsonable_encoder(payload))
+    token = payload.get("data", {}).get("accessToken")
+    if token:
+        _set_auth_cookie(response, token)
+    return response
+
+
+def build_logout_response() -> Response:
+    response = Response(status_code=status.HTTP_204_NO_CONTENT)
+    clear_auth_cookie(response)
+    return response
+
+
+def _get_request_token(
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials],
+) -> Optional[str]:
+    if credentials and credentials.credentials:
+        return credentials.credentials
+    cookie_token = request.cookies.get(AUTH_COOKIE_NAME)
+    if cookie_token:
+        return cookie_token
+    return None
+
+
+async def _resolve_user_from_token(token: str) -> dict:
     try:
-        payload = jwt.decode(credentials.credentials, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
     except jwt.PyJWTError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -150,12 +221,33 @@ async def get_current_user(
     return user
 
 
+async def get_current_user(
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(auth_scheme),
+) -> dict:
+    token = _get_request_token(request, credentials)
+    if token is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"message": "Authentication required"},
+        )
+
+    return await _resolve_user_from_token(token)
+
+
 async def get_optional_user(
+    request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(auth_scheme),
 ) -> Optional[dict]:
-    if credentials is None:
+    token = _get_request_token(request, credentials)
+    if token is None:
         return None
-    return await get_current_user(credentials)
+    try:
+        return await _resolve_user_from_token(token)
+    except HTTPException as exc:
+        if exc.status_code in {status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN}:
+            return None
+        raise
 
 
 def require_roles(*roles: str):
@@ -368,9 +460,31 @@ class UserService:
         return {"message": "User created successfully", "data": serialize_user(user)}
 
     @staticmethod
-    async def get_all_users():
+    async def get_all_users(
+        search: Optional[str] = None,
+        role: Optional[str] = None,
+        status: Optional[str] = None,
+        page: Optional[int] = None,
+        page_size: Optional[int] = None,
+    ):
+        query = {}
+        if search:
+            query["$or"] = [
+                {"first_name": {"$regex": search, "$options": "i"}},
+                {"last_name": {"$regex": search, "$options": "i"}},
+                {"email": {"$regex": search, "$options": "i"}},
+            ]
+        if role and role.lower() != "all":
+            query["role"] = role
+        if status in {"active", "inactive"}:
+            query["is_active"] = status == "active"
+
         users = []
-        cursor = users_collection.find().sort("created_at", -1)
+        cursor = users_collection.find(query).sort("created_at", -1)
+        resolved_page, resolved_page_size = normalize_pagination(page, page_size, default_page_size=10)
+        total_items = await users_collection.count_documents(query)
+        if resolved_page and resolved_page_size:
+            cursor = cursor.skip((resolved_page - 1) * resolved_page_size).limit(resolved_page_size)
         async for user in cursor:
             users.append(
                 {
@@ -380,7 +494,11 @@ class UserService:
                 }
             )
 
-        return {"message": "Users fetched successfully", "data": users}
+        response = {"message": "Users fetched successfully", "data": users}
+        pagination = build_pagination(total_items, resolved_page, resolved_page_size)
+        if pagination:
+            response["pagination"] = pagination
+        return response
 
     @staticmethod
     async def get_user(user_id: str):

@@ -1,6 +1,7 @@
+import os
 from typing import Optional
 
-from fastapi import Depends, FastAPI, File, Form, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 from database.database import ensure_indexes
@@ -93,9 +94,36 @@ app = FastAPI(
     openapi_tags=openapi_tags,
 )
 
+
+def _read_cors_origins() -> list[str]:
+    default_origins = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "https://localhost:3000",
+        "https://127.0.0.1:3000",
+    ]
+    env_keys = ("FRONTEND_ORIGINS", "CORS_ALLOWED_ORIGINS", "FRONTEND_URL", "APP_URL")
+    configured_origins: list[str] = []
+
+    for key in env_keys:
+        raw_value = os.getenv(key, "")
+        if not raw_value:
+            continue
+        for origin in raw_value.split(","):
+            cleaned_origin = origin.strip().strip('"').strip("'").rstrip("/")
+            if cleaned_origin:
+                configured_origins.append(cleaned_origin)
+
+    ordered_origins: list[str] = []
+    for origin in [*default_origins, *configured_origins]:
+        if origin and origin not in ordered_origins:
+            ordered_origins.append(origin)
+    return ordered_origins
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_read_cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -128,7 +156,8 @@ def root():
     description="Creates a new public student or instructor account and returns the authenticated session payload.",
 )
 async def register_user(payload: UserCreate):
-    return await auth_services.AuthService.register_user(payload)
+    response = await auth_services.AuthService.register_user(payload)
+    return auth_services.attach_auth_cookie(response, status_code=201)
 
 
 @app.post(
@@ -139,7 +168,8 @@ async def register_user(payload: UserCreate):
     description="Creates an admin account when the correct private setup secret is supplied.",
 )
 async def register_private_admin(payload: PrivateAdminCreateRequest):
-    return await auth_services.AuthService.register_private_admin(payload)
+    response = await auth_services.AuthService.register_private_admin(payload)
+    return auth_services.attach_auth_cookie(response, status_code=201)
 
 
 @app.post(
@@ -149,7 +179,19 @@ async def register_private_admin(payload: PrivateAdminCreateRequest):
     description="Authenticates a user with email and password and returns a fresh access token.",
 )
 async def login_user(payload: UserLogin):
-    return await auth_services.AuthService.login_user(payload)
+    response = await auth_services.AuthService.login_user(payload)
+    return auth_services.attach_auth_cookie(response)
+
+
+@app.post(
+    "/auth/logout",
+    status_code=204,
+    tags=["Authentication"],
+    summary="Log out current session",
+    description="Clears the current browser session cookie so the user is signed out cleanly.",
+)
+async def logout_user():
+    return auth_services.build_logout_response()
 
 
 @app.get(
@@ -194,8 +236,15 @@ async def create_upload_signature(
     summary="List users",
     description="Returns all users with high-level enrollment and quiz activity counts.",
 )
-async def get_all_users(current_user: dict = Depends(auth_services.require_roles("Admin"))):
-    return await auth_services.UserService.get_all_users()
+async def get_all_users(
+    search: Optional[str] = None,
+    role: Optional[str] = None,
+    status: Optional[str] = None,
+    page: Optional[int] = Query(None, ge=1),
+    pageSize: Optional[int] = Query(None, ge=1, le=100),
+    current_user: dict = Depends(auth_services.require_roles("Admin")),
+):
+    return await auth_services.UserService.get_all_users(search, role, status, page, pageSize)
 
 
 @app.post(
@@ -375,11 +424,17 @@ async def get_course_catalog(
     category: Optional[str] = None,
     difficulty: Optional[str] = None,
     search: Optional[str] = None,
+    sortBy: Optional[str] = None,
+    page: Optional[int] = Query(None, ge=1),
+    pageSize: Optional[int] = Query(None, ge=1, le=100),
 ):
     return await course_services.CourseCatalogService.get_course_catalog(
         category=category,
         difficulty=difficulty,
         search=search,
+        sort_by=sortBy,
+        page=page,
+        page_size=pageSize,
     )
 
 
@@ -456,8 +511,22 @@ async def get_course_curriculum(slug: str):
     summary="List lesson library items",
     description="Returns published course-linked sub-lessons and whether the current user can open them from an enrolled course.",
 )
-async def get_lesson_library(current_user: Optional[dict] = Depends(auth_services.get_optional_user)):
-    return await lesson_library_services.LessonLibraryService.get_library(current_user)
+async def get_lesson_library(
+    search: Optional[str] = None,
+    accessStatus: Optional[str] = None,
+    courseSlug: Optional[str] = None,
+    page: Optional[int] = Query(None, ge=1),
+    pageSize: Optional[int] = Query(None, ge=1, le=100),
+    current_user: Optional[dict] = Depends(auth_services.get_optional_user),
+):
+    return await lesson_library_services.LessonLibraryService.get_library(
+        current_user,
+        search=search,
+        access_status=accessStatus,
+        course_slug=courseSlug,
+        page=page,
+        page_size=pageSize,
+    )
 
 
 @app.put(
@@ -557,8 +626,13 @@ async def run_content_generation_action(
     summary="List quizzes",
     description="Returns the quizzes currently available in the platform.",
 )
-async def get_quizzes():
-    return await quiz_services.QuizService.get_quizzes()
+async def get_quizzes(
+    search: Optional[str] = None,
+    courseSlug: Optional[str] = None,
+    page: Optional[int] = Query(None, ge=1),
+    pageSize: Optional[int] = Query(None, ge=1, le=100),
+):
+    return await quiz_services.QuizService.get_quizzes(search=search, course_slug=courseSlug, page=page, page_size=pageSize)
 
 
 @app.post(
@@ -604,8 +678,16 @@ async def get_all_quiz_questions():
     summary="Get question bank",
     description="Returns the full question bank for question management interfaces.",
 )
-async def get_question_bank(current_user: dict = Depends(auth_services.require_roles("Admin", "Instructor"))):
-    return await quiz_services.QuizService.get_question_bank()
+async def get_question_bank(
+    search: Optional[str] = None,
+    quizId: Optional[str] = None,
+    difficulty: Optional[str] = None,
+    activeStatus: Optional[str] = None,
+    page: Optional[int] = Query(None, ge=1),
+    pageSize: Optional[int] = Query(None, ge=1, le=100),
+    current_user: dict = Depends(auth_services.require_roles("Admin", "Instructor")),
+):
+    return await quiz_services.QuizService.get_question_bank(search, quizId, difficulty, activeStatus, page, pageSize)
 
 
 @app.post(

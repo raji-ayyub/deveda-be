@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Optional
 
 from database.database import course_catalog_collection, lesson_library_collection, user_courses_collection
+from services.pagination_utils import build_pagination, normalize_pagination, pagination_slice
 
 
 def _clean_text(value: Optional[str]) -> str:
@@ -212,7 +213,15 @@ class LessonLibraryService:
         return serialize_lesson_library_item(item, access_status="draft", entry_route=None)
 
     @staticmethod
-    async def get_library(current_user: Optional[dict] = None) -> dict:
+    async def get_library(
+        current_user: Optional[dict] = None,
+        *,
+        search: Optional[str] = None,
+        access_status: Optional[str] = None,
+        course_slug: Optional[str] = None,
+        page: Optional[int] = None,
+        page_size: Optional[int] = None,
+    ) -> dict:
         await LessonLibraryService.prune_missing_course_refs()
         query = {"course_refs.0": {"$exists": True}}
         lessons = await lesson_library_collection.find(query).sort("updated_at", -1).to_list(length=300)
@@ -248,4 +257,60 @@ class LessonLibraryService:
             )
             payload.append(serialize_lesson_library_item(lesson, access_status=access_status, entry_route=entry_route))
 
-        return {"message": "Lesson library fetched", "data": payload}
+        normalized_search = _clean_text(search).lower()
+        normalized_access_status = _clean_text(access_status).lower()
+        normalized_course_slug = _clean_text(course_slug)
+
+        if normalized_search:
+            payload = [
+                lesson
+                for lesson in payload
+                if normalized_search
+                in " ".join(
+                    [
+                        lesson.get("title", ""),
+                        lesson.get("summary", ""),
+                        " ".join(
+                            f"{ref.get('courseTitle', '')} {ref.get('moduleTitle', '')} {ref.get('courseSlug', '')}"
+                            for ref in lesson.get("courseRefs", [])
+                        ),
+                    ]
+                ).lower()
+            ]
+
+        if normalized_access_status in {"available", "locked", "draft"}:
+            payload = [lesson for lesson in payload if lesson.get("accessStatus") == normalized_access_status]
+
+        if normalized_course_slug:
+            payload = [
+                lesson
+                for lesson in payload
+                if any(ref.get("courseSlug") == normalized_course_slug for ref in lesson.get("courseRefs", []))
+            ]
+
+        summary = {
+            "totalLessons": len(payload),
+            "availableLessons": len([lesson for lesson in payload if lesson.get("accessStatus") == "available"]),
+            "lockedLessons": len([lesson for lesson in payload if lesson.get("accessStatus") == "locked"]),
+            "linkedCourses": len(
+                {
+                    ref.get("courseSlug")
+                    for lesson in payload
+                    for ref in lesson.get("courseRefs", [])
+                    if ref.get("courseSlug")
+                }
+            ),
+            "totalDurationMinutes": sum(int(lesson.get("durationMinutes") or 0) for lesson in payload),
+        }
+
+        resolved_page, resolved_page_size = normalize_pagination(page, page_size)
+        total_items = len(payload)
+        if resolved_page and resolved_page_size:
+            start, end = pagination_slice(resolved_page, resolved_page_size)
+            payload = payload[start:end]
+
+        response = {"message": "Lesson library fetched", "data": payload, "summary": summary}
+        pagination = build_pagination(total_items, resolved_page, resolved_page_size)
+        if pagination:
+            response["pagination"] = pagination
+        return response

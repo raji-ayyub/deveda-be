@@ -7,6 +7,7 @@ from database.database import course_curricula_collection, quiz_progress_collect
 from schemas.schemas import QuestionCreate, QuizAttemptCreate
 from services.achievement_services import AchievementService
 from services.auth_services import validate_object_id
+from services.pagination_utils import build_pagination, normalize_pagination
 
 
 def serialize_question(question: dict, include_answer: bool = True) -> dict:
@@ -151,15 +152,48 @@ class QuizService:
         return {"message": "Question deleted successfully", "data": True}
 
     @staticmethod
-    async def get_question_bank():
+    async def get_question_bank(
+        search: str | None = None,
+        quiz_id: str | None = None,
+        difficulty: str | None = None,
+        active_status: str | None = None,
+        page: int | None = None,
+        page_size: int | None = None,
+    ):
+        query = {}
+        if search:
+            query["$or"] = [
+                {"question": {"$regex": search, "$options": "i"}},
+                {"quiz_id": {"$regex": search, "$options": "i"}},
+            ]
+        if quiz_id:
+            query["quiz_id"] = quiz_id
+        if difficulty:
+            query["difficulty"] = difficulty
+        if active_status in {"active", "inactive"}:
+            query["is_active"] = active_status == "active"
+
         questions = []
-        cursor = quiz_questions_collection.find().sort("updated_at", -1)
+        cursor = quiz_questions_collection.find(query).sort("updated_at", -1)
+        resolved_page, resolved_page_size = normalize_pagination(page, page_size)
+        total_items = await quiz_questions_collection.count_documents(query)
+        if resolved_page and resolved_page_size:
+            cursor = cursor.skip((resolved_page - 1) * resolved_page_size).limit(resolved_page_size)
         async for question in cursor:
             questions.append(serialize_question(question))
-        return {"message": "Question bank fetched", "data": questions}
+        response = {"message": "Question bank fetched", "data": questions}
+        pagination = build_pagination(total_items, resolved_page, resolved_page_size)
+        if pagination:
+            response["pagination"] = pagination
+        return response
 
     @staticmethod
-    async def get_quizzes():
+    async def get_quizzes(
+        search: str | None = None,
+        course_slug: str | None = None,
+        page: int | None = None,
+        page_size: int | None = None,
+    ):
         metadata = await _quiz_catalog_metadata()
         quizzes = []
         quiz_ids = await quiz_questions_collection.distinct("quiz_id")
@@ -179,7 +213,28 @@ class QuizService:
                     "duration": duration,
                 }
             )
-        return {"message": "Quizzes fetched", "data": quizzes}
+
+        normalized_search = (search or "").strip().lower()
+        if normalized_search:
+            quizzes = [
+                quiz
+                for quiz in quizzes
+                if normalized_search in f"{quiz['title']} {quiz['id']} {quiz.get('courseSlug') or ''}".lower()
+            ]
+        if course_slug:
+            quizzes = [quiz for quiz in quizzes if quiz.get("courseSlug") == course_slug]
+
+        total_items = len(quizzes)
+        resolved_page, resolved_page_size = normalize_pagination(page, page_size)
+        if resolved_page and resolved_page_size:
+            start = (resolved_page - 1) * resolved_page_size
+            quizzes = quizzes[start:start + resolved_page_size]
+
+        response = {"message": "Quizzes fetched", "data": quizzes}
+        pagination = build_pagination(total_items, resolved_page, resolved_page_size)
+        if pagination:
+            response["pagination"] = pagination
+        return response
 
     @staticmethod
     async def get_quiz_questions(quiz_id: str):

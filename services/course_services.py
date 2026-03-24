@@ -18,6 +18,7 @@ from schemas.schemas import CourseEnroll, CourseCatalogCreate, CourseProgressUpd
 from services.auth_services import validate_object_id, serialize_user
 from services.achievement_services import AchievementService
 from services.lesson_library_services import LessonLibraryService
+from services.pagination_utils import build_pagination, normalize_pagination, pagination_slice
 
 CODING_CATEGORIES = {"Frontend Development", "Backend Development", "Systems Design"}
 
@@ -251,7 +252,10 @@ class CourseCatalogService:
     async def get_course_catalog(
         category: Optional[str] = None,
         difficulty: Optional[str] = None,
-        search: Optional[str] = None
+        search: Optional[str] = None,
+        sort_by: Optional[str] = None,
+        page: Optional[int] = None,
+        page_size: Optional[int] = None,
     ):
         query = {"category": {"$in": list(CODING_CATEGORIES)}}
         
@@ -270,10 +274,39 @@ class CourseCatalogService:
         async for c in course_catalog_collection.find(query):
             courses.append(serialize_course_catalog(c))
 
-        return {
+        normalized_sort = (sort_by or "newest").lower()
+        if normalized_sort == "popular":
+            popularity = {
+                item["_id"]: item["count"]
+                for item in await user_courses_collection.aggregate(
+                    [
+                        {"$match": {"course_slug": {"$in": [course["slug"] for course in courses]}}},
+                        {"$group": {"_id": "$course_slug", "count": {"$sum": 1}}},
+                    ]
+                ).to_list(length=None)
+            }
+            courses.sort(key=lambda course: (-popularity.get(course["slug"], 0), course["title"].lower()))
+        elif normalized_sort == "duration":
+            courses.sort(key=lambda course: (course.get("duration", 0), course["title"].lower()))
+        elif normalized_sort == "title":
+            courses.sort(key=lambda course: course["title"].lower())
+        else:
+            courses.sort(key=lambda course: course.get("createdAt") or datetime.min, reverse=True)
+
+        resolved_page, resolved_page_size = normalize_pagination(page, page_size)
+        total_items = len(courses)
+        if resolved_page and resolved_page_size:
+            start, end = pagination_slice(resolved_page, resolved_page_size)
+            courses = courses[start:end]
+
+        response = {
             "message": "Course catalog fetched",
             "data": courses,
         }
+        pagination = build_pagination(total_items, resolved_page, resolved_page_size)
+        if pagination:
+            response["pagination"] = pagination
+        return response
     
     @staticmethod
     async def get_course_by_slug(slug: str):
@@ -391,6 +424,13 @@ class CourseCatalogService:
             {"$sort": {"count": -1}}
         ]
         difficulties = await course_catalog_collection.aggregate(difficulty_pipeline).to_list(None)
+
+        duration_pipeline = [
+            {"$match": catalog_query},
+            {"$group": {"_id": None, "average_duration": {"$avg": "$duration"}, "total_lessons": {"$sum": "$total_lessons"}, "total_quizzes": {"$sum": "$total_quizzes"}}},
+        ]
+        duration_stats = await course_catalog_collection.aggregate(duration_pipeline).to_list(length=1)
+        summary = duration_stats[0] if duration_stats else {}
         
         return {
             "message": "Course catalog statistics",
@@ -401,6 +441,9 @@ class CourseCatalogService:
                 "popular_courses": popular_courses,
                 "categories": categories,
                 "difficulties": difficulties,
+                "average_duration": round(summary.get("average_duration", 0) or 0),
+                "total_lessons": int(summary.get("total_lessons", 0) or 0),
+                "total_quizzes": int(summary.get("total_quizzes", 0) or 0),
             },
         }
     

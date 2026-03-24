@@ -59,11 +59,11 @@ AGENT_TEMPLATES = {
     },
     "lesson_tutor": {
         "key": "lesson_tutor",
-        "name": "Lesson Tutor",
-        "description": "Explains lesson material in a side chat with examples, stories, and step-by-step guidance.",
+        "name": "Nexa",
+        "description": "A supportive lesson companion that explains material with examples, analogies, and gentle guidance.",
         "allowedRequesterRoles": ["Student", "Instructor"],
         "requiresApproval": True,
-        "defaultTitle": "Lesson Tutor Chat",
+        "defaultTitle": "Nexa Chat",
     },
     "platform_support": {
         "key": "platform_support",
@@ -207,6 +207,27 @@ def _serialize_message(document: dict) -> dict:
         "content": document["content"],
         "metadata": document.get("metadata", {}),
         "createdAt": document.get("created_at"),
+    }
+
+
+def _request_requires_approval(template: dict, current_user: dict) -> bool:
+    return bool(template.get("requiresApproval", True)) and current_user.get("role") != "Admin"
+
+
+def _assignment_identity_query(
+    *,
+    user_id: ObjectId,
+    agent_type: str,
+    target_user_id: Optional[ObjectId] = None,
+    course_slug: Optional[str] = None,
+    lesson_slug: Optional[str] = None,
+) -> dict:
+    return {
+        "user_id": user_id,
+        "agent_type": agent_type,
+        "target_user_id": target_user_id,
+        "course_slug": course_slug,
+        "lesson_slug": lesson_slug,
     }
 
 
@@ -2017,25 +2038,27 @@ def _lesson_tutor_reply(message: str, context: dict) -> str:
 
     if lesson:
         return (
-            f"Let us work through `{lesson['title']}` from `{course['title']}` in a calm way.\n\n"
-            f"Lesson focus: {lesson.get('summary', 'This lesson builds one core skill step by step.')} "
-            f"Think of it like learning to ride a bicycle: first you see the balance, then you try one small push, then you repeat until it feels natural.\n\n"
-            f"Here is the teaching pattern I recommend:\n"
-            f"1. Explain the idea in plain language.\n"
-            f"2. Show one small example.\n"
-            f"3. Ask the learner to change one part of that example.\n"
-            f"4. Connect the lesson back to the bigger course project.\n\n"
-            f"If you send the exact concept you want explained, I will teach it with an example and a simple story."
+            f"I’m Nexa, here to support you inside `{lesson['title']}` from `{course['title']}`.\n\n"
+            f"Current focus: {lesson.get('summary', 'This lesson builds one core skill in manageable steps.')} "
+            f"A gentle way to look at it is like learning balance on a bicycle: you notice the motion first, try a small movement, and confidence grows from repetition.\n\n"
+            f"If it helps, we can take this in one of these ways:\n"
+            f"1. A plain-language explanation.\n"
+            f"2. A small example with code.\n"
+            f"3. A simple analogy or story.\n"
+            f"4. A walkthrough of one confusing part.\n\n"
+            f"Send the part that feels unclear, and I’ll meet you there without rushing ahead."
         )
 
     if course:
         return (
-            f"I am ready to tutor inside `{course['title']}`. Ask me about any concept, and I will explain it with examples, analogies, and a gentle step-by-step path.\n\n"
-            f"If the learner is stuck, I can switch to simpler wording first, then rebuild toward the formal explanation."
+            f"I’m Nexa, your learning support companion for `{course['title']}`. "
+            f"I can help unpack ideas with examples, analogies, and calmer step-by-step explanations.\n\n"
+            f"If something feels tangled, we can start with simpler wording and build back toward the formal version together."
         )
 
     return (
-        "I can teach the current lesson through examples, stories, and short checkpoints. Ask a question like 'Explain props like I am 12' or 'Show me a simple example with code and why it works.'"
+        "I’m Nexa. I can support the current lesson with examples, stories, simpler rewording, and short walkthroughs. "
+        "You can ask something like 'Explain props in a simple way' or 'Can we walk through a small example together?'"
     )
 
 
@@ -2556,7 +2579,12 @@ def _system_prompt(agent_type: str, context: dict) -> str:
     if agent_type == "progress_analyst":
         return "You are Deveda's Progress Analyst agent. Review learner progress and turn it into actionable lesson planning guidance for instructors."
     if agent_type == "lesson_tutor":
-        return "You are Deveda's Lesson Tutor agent. Teach clearly, kindly, and concretely. Use the provided lesson and course context before answering."
+        return (
+            "You are Nexa, Deveda's learner support companion. "
+            "Be warm, calm, and encouraging. Support rather than command. "
+            "Avoid bossy or overly directive phrasing. Prefer collaborative language like 'we can', 'it may help to', and 'if you want'. "
+            "Explain clearly, kindly, and concretely, using the provided lesson and course context before answering."
+        )
     return "You are Deveda's Platform Support agent. Help users navigate the product and understand where to go next. Use the current platform map from context instead of generic guesses."
 
 
@@ -3293,6 +3321,46 @@ class AgentService:
                 )
 
         now = datetime.utcnow()
+        request_needs_approval = _request_requires_approval(template, current_user)
+        existing = await agent_assignments_collection.find_one(
+            _assignment_identity_query(
+                user_id=current_user["_id"],
+                agent_type=payload.agentType,
+                target_user_id=target_user_id,
+                course_slug=payload.courseSlug,
+                lesson_slug=payload.lessonSlug,
+            ),
+            sort=[("updated_at", -1)],
+        )
+
+        if existing:
+            if existing.get("status") == "approved":
+                return {"message": "Agent request already approved", "data": _serialize_assignment(existing)}
+
+            if existing.get("status") == "pending":
+                update_data = {
+                    "display_name": payload.displayName or existing.get("display_name") or template["name"],
+                    "notes": payload.notes,
+                    "updated_at": now,
+                }
+                await agent_assignments_collection.update_one({"_id": existing["_id"]}, {"$set": update_data})
+                existing.update(update_data)
+                return {"message": "Agent request already pending", "data": _serialize_assignment(existing)}
+
+            update_data = {
+                "requested_by": current_user.get("role"),
+                "display_name": payload.displayName or existing.get("display_name") or template["name"],
+                "notes": payload.notes,
+                "status": "pending" if request_needs_approval else "approved",
+                "admin_notes": "",
+                "approved_by": None if request_needs_approval else current_user["_id"],
+                "approved_at": None if request_needs_approval else now,
+                "updated_at": now,
+            }
+            await agent_assignments_collection.update_one({"_id": existing["_id"]}, {"$set": update_data})
+            existing.update(update_data)
+            return {"message": "Agent request resubmitted", "data": _serialize_assignment(existing)}
+
         document = {
             "user_id": current_user["_id"],
             "requested_by": current_user.get("role"),
@@ -3302,10 +3370,10 @@ class AgentService:
             "notes": payload.notes,
             "course_slug": payload.courseSlug,
             "lesson_slug": payload.lessonSlug,
-            "status": "approved" if current_user.get("role") == "Admin" else "pending",
+            "status": "pending" if request_needs_approval else "approved",
             "admin_notes": "",
-            "approved_by": current_user["_id"] if current_user.get("role") == "Admin" else None,
-            "approved_at": now if current_user.get("role") == "Admin" else None,
+            "approved_by": None if request_needs_approval else current_user["_id"],
+            "approved_at": None if request_needs_approval else now,
             "created_at": now,
             "updated_at": now,
         }
