@@ -2041,13 +2041,54 @@ def _lesson_tutor_reply(message: str, context: dict) -> str:
     lesson_focus = lesson.get("summary") if lesson else None
     topic_text = _normalize_text(f"{lesson.get('title', '')} {lesson.get('summary', '')}" if lesson else "")
 
-    if normalized_message in {"hi", "hello", "hey", "good morning", "good afternoon", "good evening"}:
+    if (
+        normalized_message in {"hi", "hello", "hey", "good morning", "good afternoon", "good evening"}
+        or normalized_message.startswith("hi ")
+        or normalized_message.startswith("hello ")
+        or normalized_message.startswith("hey ")
+    ):
         if lesson:
             return (
                 f"Hi, I’m Nexa. I’m here with you in `{lesson_title}` from `{course_title}`.\n\n"
                 f"If you want, tell me what feels unclear and we can unpack it together in a simple way."
             )
         return "Hi, I’m Nexa. Tell me what feels confusing and we can work through it together."
+
+    if any(
+        phrase in normalized_message
+        for phrase in [
+            "headache",
+            "headacke",
+            "migraine",
+            "i am tired",
+            "im tired",
+            "feel tired",
+            "not feeling well",
+            "not okay",
+            "stressed",
+            "overwhelmed",
+        ]
+    ):
+        return (
+            "Sorry you’re dealing with that. We do not need to force the lesson right now.\n\n"
+            "If you want, we can keep things very light and focus on one small question only, or you can pause and come back later. "
+            "If the headache feels strong, unusual, or keeps getting worse, please take care of yourself first and get real-world support."
+        )
+
+    if any(
+        phrase in normalized_message
+        for phrase in ["thanks", "thank you", "got it", "okay thanks", "ok thanks"]
+    ):
+        return "You’re welcome. If another part feels unclear, send it over and we can take it one small step at a time."
+
+    if any(
+        phrase in normalized_message
+        for phrase in ["bummer", "frustrated", "annoying", "stuck", "this sucks", "not working"]
+    ):
+        return (
+            "That sounds frustrating. We can slow it down and isolate just one piece at a time.\n\n"
+            "If you paste the code or tell me exactly what changed versus what you expected, I can help narrow it down with you."
+        )
 
     if any(
         phrase in normalized_message
@@ -2169,6 +2210,43 @@ def _lesson_tutor_reply(message: str, context: dict) -> str:
         "I’m Nexa. I can support the current lesson with examples, stories, simpler rewording, and short walkthroughs. "
         "You can ask something like 'Explain props in a simple way' or 'Can we walk through a small example together?'"
     )
+
+
+def _build_controlled_lesson_tutor_reply(message: str, context: dict) -> Optional[dict]:
+    normalized_message = _normalize_text(message)
+    should_intercept = any(
+        [
+            normalized_message.startswith("hi"),
+            normalized_message.startswith("hello"),
+            normalized_message.startswith("hey"),
+            "headache" in normalized_message,
+            "headacke" in normalized_message,
+            "migraine" in normalized_message,
+            "stressed" in normalized_message,
+            "overwhelmed" in normalized_message,
+            "tired" in normalized_message,
+            "run button" in normalized_message,
+            "press run" in normalized_message,
+            "not updating" in normalized_message,
+            "not showing" in normalized_message,
+            "isnt updating" in normalized_message,
+            "isnt showing" in normalized_message,
+            "not working" in normalized_message,
+            "frustrated" in normalized_message,
+            "stuck" in normalized_message,
+            "bummer" in normalized_message,
+            "thank you" in normalized_message,
+            "thanks" in normalized_message,
+        ]
+    )
+
+    if not should_intercept:
+        return None
+
+    return {
+        "content": _lesson_tutor_reply(message, context),
+        "metadata": {"provider": "deveda-controlled"},
+    }
 
 
 def _platform_support_reply(message: str, context: dict) -> str:
