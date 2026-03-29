@@ -40,6 +40,17 @@ from services.course_services import CourseCatalogService
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
 
+
+def _read_positive_int_env(name: str, default: int) -> int:
+    try:
+        return max(int(os.getenv(name, str(default)) or default), 1)
+    except (TypeError, ValueError):
+        return default
+
+
+MAX_LESSON_TUTOR_THREADS_PER_CONTEXT = _read_positive_int_env("MAX_LESSON_TUTOR_THREADS_PER_CONTEXT", 12)
+MAX_LESSON_TUTOR_MESSAGES_PER_THREAD = _read_positive_int_env("MAX_LESSON_TUTOR_MESSAGES_PER_THREAD", 80)
+
 AGENT_TEMPLATES = {
     "course_builder": {
         "key": "course_builder",
@@ -59,11 +70,11 @@ AGENT_TEMPLATES = {
     },
     "lesson_tutor": {
         "key": "lesson_tutor",
-        "name": "Nexa",
+        "name": "Zara",
         "description": "A supportive lesson companion that explains material with examples, analogies, and gentle guidance.",
         "allowedRequesterRoles": ["Student", "Instructor"],
         "requiresApproval": True,
-        "defaultTitle": "Nexa Chat",
+        "defaultTitle": "Zara Chat",
     },
     "platform_support": {
         "key": "platform_support",
@@ -228,6 +239,21 @@ def _assignment_identity_query(
         "target_user_id": target_user_id,
         "course_slug": course_slug,
         "lesson_slug": lesson_slug,
+    }
+
+
+def _thread_scope_query(
+    *,
+    assignment_id: ObjectId,
+    user_id: ObjectId,
+    course_slug: Optional[str] = None,
+    lesson_slug: Optional[str] = None,
+) -> dict:
+    return {
+        "assignment_id": assignment_id,
+        "user_id": user_id,
+        "context.courseSlug": course_slug,
+        "context.lessonSlug": lesson_slug,
     }
 
 
@@ -1107,7 +1133,7 @@ def _build_generated_lesson_payload(course: dict, lesson: dict, plan_payload: di
             playground = {
                 "mode": "javascript",
                 "instructions": f"Write a focused JavaScript example for {lesson_title.lower()} and print output that proves the logic works.",
-                "starterJs": "function runLessonExample() {\n  return 'ready';\n}\n\nconsole.log(runLessonExample());\n",
+                "starterJs": "function runLessoZarample() {\n  return 'ready';\n}\n\nconsole.log(runLessoZarample());\n",
                 "checks": [
                     {"label": "Define a function", "type": "includes", "target": "js", "value": "function"},
                     {"label": "Log the result", "type": "includes", "target": "js", "value": "console.log"},
@@ -2032,7 +2058,20 @@ def _progress_analyst_reply(message: str, context: dict) -> str:
     return "\n\n".join(lines)
 
 
+def _lesson_tutor_unavailable_reply(context: dict) -> str:
+    course = context.get("course")
+    lesson = context.get("lesson")
+
+    if lesson and course:
+        return f"I couldn't generate a reply for `{lesson['title']}` in `{course['title']}` right now. Please try again in a moment."
+    if course:
+        return f"I couldn't generate a reply for `{course['title']}` right now. Please try again in a moment."
+    return "I couldn't generate a reply right now. Please try again in a moment."
+
+
 def _lesson_tutor_reply(message: str, context: dict) -> str:
+    return _lesson_tutor_unavailable_reply(context)
+
     course = context.get("course")
     lesson = context.get("lesson")
     normalized_message = _normalize_text(message)
@@ -2049,10 +2088,10 @@ def _lesson_tutor_reply(message: str, context: dict) -> str:
     ):
         if lesson:
             return (
-                f"Hi, I’m Nexa. I’m here with you in `{lesson_title}` from `{course_title}`.\n\n"
+                f"Hi, I’m Zara. I’m here with you in `{lesson_title}` from `{course_title}`.\n\n"
                 f"If you want, tell me what feels unclear and we can unpack it together in a simple way."
             )
-        return "Hi, I’m Nexa. Tell me what feels confusing and we can work through it together."
+        return "Hi, I’m Zara. Tell me what feels confusing and we can work through it together."
 
     if any(
         phrase in normalized_message
@@ -2188,7 +2227,7 @@ def _lesson_tutor_reply(message: str, context: dict) -> str:
 
     if lesson:
         return (
-            f"I’m Nexa, here with you inside `{lesson['title']}` from `{course['title']}`.\n\n"
+            f"I’m Zara, here with you inside `{lesson['title']}` from `{course['title']}`.\n\n"
             f"Current focus: {lesson.get('summary', 'This lesson builds one core skill in manageable steps.')} "
             f"We can keep it practical and take only the part you need right now.\n\n"
             f"If it helps, we can take this in one of these ways:\n"
@@ -2201,52 +2240,19 @@ def _lesson_tutor_reply(message: str, context: dict) -> str:
 
     if course:
         return (
-            f"I’m Nexa, your learning support companion for `{course['title']}`. "
+            f"I’m Zara, your learning support companion for `{course['title']}`. "
             f"I can help unpack ideas with examples, analogies, and calmer step-by-step explanations.\n\n"
             f"If something feels tangled, we can start with simpler wording and build back toward the formal version together."
         )
 
     return (
-        "I’m Nexa. I can support the current lesson with examples, stories, simpler rewording, and short walkthroughs. "
+        "I’m Zara. I can support the current lesson with examples, stories, simpler rewording, and short walkthroughs. "
         "You can ask something like 'Explain props in a simple way' or 'Can we walk through a small example together?'"
     )
 
 
 def _build_controlled_lesson_tutor_reply(message: str, context: dict) -> Optional[dict]:
-    normalized_message = _normalize_text(message)
-    should_intercept = any(
-        [
-            normalized_message.startswith("hi"),
-            normalized_message.startswith("hello"),
-            normalized_message.startswith("hey"),
-            "headache" in normalized_message,
-            "headacke" in normalized_message,
-            "migraine" in normalized_message,
-            "stressed" in normalized_message,
-            "overwhelmed" in normalized_message,
-            "tired" in normalized_message,
-            "run button" in normalized_message,
-            "press run" in normalized_message,
-            "not updating" in normalized_message,
-            "not showing" in normalized_message,
-            "isnt updating" in normalized_message,
-            "isnt showing" in normalized_message,
-            "not working" in normalized_message,
-            "frustrated" in normalized_message,
-            "stuck" in normalized_message,
-            "bummer" in normalized_message,
-            "thank you" in normalized_message,
-            "thanks" in normalized_message,
-        ]
-    )
-
-    if not should_intercept:
-        return None
-
-    return {
-        "content": _lesson_tutor_reply(message, context),
-        "metadata": {"provider": "deveda-controlled"},
-    }
+    return None
 
 
 def _platform_support_reply(message: str, context: dict) -> str:
@@ -2756,7 +2762,7 @@ def _fallback_reply(agent_type: str, message: str, context: dict) -> str:
     if agent_type == "progress_analyst":
         return _progress_analyst_reply(message, context)
     if agent_type == "lesson_tutor":
-        return _lesson_tutor_reply(message, context)
+        return _lesson_tutor_unavailable_reply(context)
     return _platform_support_reply(message, context)
 
 
@@ -2767,10 +2773,16 @@ def _system_prompt(agent_type: str, context: dict) -> str:
         return "You are Deveda's Progress Analyst agent. Review learner progress and turn it into actionable lesson planning guidance for instructors."
     if agent_type == "lesson_tutor":
         return (
-            "You are Nexa, Deveda's learner support companion. "
+            "You are Zara, Deveda's learner support companion. "
             "Be warm, calm, and encouraging. Support rather than command. "
             "Avoid bossy or overly directive phrasing. Prefer collaborative language like 'we can', 'it may help to', and 'if you want'. "
-            "Explain clearly, kindly, and concretely, using the provided lesson and course context before answering."
+            "Write in simple, clear English that works for teenagers as well as adults. "
+            "Use short sentences, plain words, and natural grammar. "
+            "Avoid jargon, formal academic wording, and complex sentence structure. "
+            "If you must use a technical word, explain it right away in simple language. "
+            "Keep the response easy to scan and focus on one idea at a time. "
+            "Explain clearly, kindly, and concretely, using the provided lesson and course context before answering. "
+            "Answer the learner's latest message directly. Do not repeatedly introduce yourself, and do not default to canned menus, numbered option lists, or demo prompts unless the learner explicitly asks for options."
         )
     return "You are Deveda's Platform Support agent. Help users navigate the product and understand where to go next. Use the current platform map from context instead of generic guesses."
 
@@ -2779,9 +2791,15 @@ def _build_openai_messages(agent_type: str, context: dict, history: list[dict], 
     messages = [{"role": "system", "content": _system_prompt(agent_type, context)}]
     context_payload = json.dumps(context, default=str)
     messages.append({"role": "system", "content": f"Current context: {context_payload}"})
-    for item in history[-6:]:
+    recent_history = history[-6:]
+    for item in recent_history:
         messages.append({"role": item["role"], "content": item["content"]})
-    messages.append({"role": "user", "content": user_message})
+    if not (
+        recent_history
+        and recent_history[-1].get("role") == "user"
+        and _normalize_text(str(recent_history[-1].get("content", ""))) == _normalize_text(user_message)
+    ):
+        messages.append({"role": "user", "content": user_message})
     return messages
 
 
@@ -3608,16 +3626,36 @@ class AgentService:
                 detail={"message": "This agent request has not been approved yet"},
             )
 
+        thread_context = {
+            "courseSlug": payload.courseSlug or assignment.get("course_slug"),
+            "lessonSlug": payload.lessonSlug or assignment.get("lesson_slug"),
+        }
+        if assignment["agent_type"] == "lesson_tutor":
+            scope_query = _thread_scope_query(
+                assignment_id=assignment["_id"],
+                user_id=assignment["user_id"],
+                course_slug=thread_context["courseSlug"],
+                lesson_slug=thread_context["lessonSlug"],
+            )
+            existing_threads = await agent_threads_collection.count_documents(scope_query)
+            if existing_threads >= MAX_LESSON_TUTOR_THREADS_PER_CONTEXT:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "message": (
+                            "You have reached the saved chat limit for this lesson. "
+                            "Delete an older chat to make room for a new one."
+                        )
+                    },
+                )
+
         now = datetime.utcnow()
         thread = {
             "assignment_id": assignment["_id"],
             "user_id": assignment["user_id"],
             "agent_type": assignment["agent_type"],
             "title": payload.title or AGENT_TEMPLATES[assignment["agent_type"]]["defaultTitle"],
-            "context": {
-                "courseSlug": payload.courseSlug or assignment.get("course_slug"),
-                "lessonSlug": payload.lessonSlug or assignment.get("lesson_slug"),
-            },
+            "context": thread_context,
             "last_message_preview": "",
             "created_at": now,
             "updated_at": now,
@@ -3732,6 +3770,22 @@ class AgentService:
         }
 
     @staticmethod
+    async def delete_thread(thread_id: str, current_user: dict):
+        thread = await _get_thread_or_404(thread_id)
+        _ensure_thread_access(current_user, thread)
+        if thread.get("agent_type") != "lesson_tutor":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"message": "Only lesson tutor chats can be deleted right now"},
+            )
+
+        await agent_messages_collection.delete_many({"thread_id": thread["_id"]})
+        await agent_runs_collection.delete_many({"thread_id": thread["_id"]})
+        await agent_threads_collection.delete_one({"_id": thread["_id"]})
+
+        return {"message": "Agent thread deleted", "data": True}
+
+    @staticmethod
     async def post_message(thread_id: str, payload: AgentMessageCreate, current_user: dict):
         thread = await _get_thread_or_404(thread_id)
         _ensure_thread_access(current_user, thread)
@@ -3741,6 +3795,18 @@ class AgentService:
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail={"message": "This agent is not approved for chat yet"},
             )
+
+        if thread.get("agent_type") == "lesson_tutor":
+            message_count = await agent_messages_collection.count_documents({"thread_id": thread["_id"]})
+            if message_count + 2 > MAX_LESSON_TUTOR_MESSAGES_PER_THREAD:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "message": (
+                            "This chat is full. Start a new chat to keep going, or delete an older chat you no longer need."
+                        )
+                    },
+                )
 
         user_message = await _store_message(thread["_id"], "user", payload.message)
         history = await _fetch_recent_messages(thread["_id"])

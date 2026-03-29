@@ -914,6 +914,19 @@ async def get_agent_thread(
     return await agent_services.AgentService.get_thread(thread_id, current_user)
 
 
+@app.delete(
+    "/agents/threads/{thread_id}",
+    tags=["Agents"],
+    summary="Delete one agent chat thread",
+    description="Deletes a lesson tutor chat thread and its stored messages.",
+)
+async def delete_agent_thread(
+    thread_id: str,
+    current_user: dict = Depends(auth_services.get_current_user),
+):
+    return await agent_services.AgentService.delete_thread(thread_id, current_user)
+
+
 @app.post(
     "/agents/threads/{thread_id}/messages",
     status_code=201,

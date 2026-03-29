@@ -196,11 +196,6 @@ class AgentGraphRuntime:
                 state["thread"]["_id"],
                 state["current_user"],
             )
-        elif state["assignment"]["agent_type"] == "lesson_tutor":
-            reply = agent._build_controlled_lesson_tutor_reply(
-                state["payload"].message,
-                state.get("context", {}),
-            )
         return {
             "controlled_reply": reply,
             "steps": _append_step(state, "controlled_reply"),
