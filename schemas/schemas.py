@@ -564,6 +564,7 @@ class AgentThreadCreate(BaseModel):
 class AgentMessageCreate(BaseModel):
     message: str
     courseSlug: Optional[str] = None
+    courseTitle: Optional[str] = None
     lessonSlug: Optional[str] = None
     lessonTitle: Optional[str] = None
     currentProgress: Optional[int] = Field(default=None, ge=0, le=100)
@@ -575,7 +576,7 @@ class AgentMessageCreate(BaseModel):
             raise ValueError("Message is required")
         return value
 
-    @validator("courseSlug", "lessonSlug", "lessonTitle", pre=True)
+    @validator("courseSlug", "courseTitle", "lessonSlug", "lessonTitle", pre=True)
     def clean_message_context(cls, value: Optional[str]) -> Optional[str]:
         if value is None:
             return value

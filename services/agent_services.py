@@ -1,10 +1,8 @@
 import json
 import os
 import re
-import socket
 from datetime import datetime
 from typing import Any, Optional
-from urllib import error, request
 
 from bson import ObjectId
 from fastapi import HTTPException, status
@@ -37,7 +35,6 @@ from services.auth_services import require_roles, serialize_user, validate_objec
 from services.content_services import ContentService, build_curriculum_scaffold, normalize_lesson
 from services.course_services import CourseCatalogService
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
 
 
@@ -102,6 +99,101 @@ def _normalize_text(value: str) -> str:
 
 def _token_set(value: str) -> set[str]:
     return {token for token in _normalize_text(value).replace("-", " ").split() if token}
+
+
+def _message_has_any_phrase(message: str, phrases: tuple[str, ...]) -> bool:
+    normalized = _normalize_text(message)
+    return any(phrase in normalized for phrase in phrases)
+
+
+def _lesson_tutor_general_turn(message: str) -> bool:
+    normalized = _normalize_text(message)
+    if not normalized:
+        return True
+
+    general_phrases = (
+        "hi",
+        "hello",
+        "hey",
+        "good morning",
+        "good afternoon",
+        "good evening",
+        "thanks",
+        "thank you",
+        "ok thanks",
+        "okay thanks",
+        "who are you",
+        "what can you do",
+        "how are you",
+        "are you there",
+        "can you help me",
+        "i need help",
+        "help me",
+        "i am overwhelmed",
+        "im overwhelmed",
+        "i am tired",
+        "im tired",
+        "not feeling well",
+        "stressed",
+        "frustrated",
+        "this sucks",
+        "bummer",
+    )
+    tutoring_hints = (
+        "lesson",
+        "course",
+        "module",
+        "quiz",
+        "code",
+        "error",
+        "bug",
+        "debug",
+        "explain",
+        "example",
+        "show me",
+        "walk through",
+        "walk me through",
+        "what is",
+        "why",
+        "how does",
+        "how do",
+        "confused",
+        "do not understand",
+        "dont understand",
+        "stuck on",
+        "practice",
+        "progress",
+        "objective",
+        "summary",
+        "assignment",
+        "project",
+    )
+    if any(hint in normalized for hint in tutoring_hints):
+        return False
+    return any(phrase == normalized or normalized.startswith(f"{phrase} ") for phrase in general_phrases)
+
+
+def _should_collect_course_context(agent_type: str, message: str, course_slug: Optional[str], lesson_slug: Optional[str]) -> bool:
+    if agent_type == "course_builder":
+        return bool(course_slug or lesson_slug or message.strip())
+
+    if agent_type != "lesson_tutor":
+        return False
+
+    if not course_slug and not lesson_slug:
+        return _message_has_any_phrase(
+            message,
+            (
+                "course",
+                "lesson",
+                "module",
+                "quiz",
+                "project",
+                "assignment",
+            ),
+        )
+
+    return not _lesson_tutor_general_turn(message)
 
 
 def _slugify_title(value: str) -> str:
@@ -1824,39 +1916,8 @@ def _normalize_generated_milestones(course: dict, projects: Any) -> list[dict]:
     ]
 
 
-def _openai_json_request(messages: list[dict], timeout: int = 30) -> Optional[dict]:
-    try:
-        result = AgentGraphRuntime.invoke_json_response_sync(messages, timeout=timeout, temperature=0.4)
-        if result is not None:
-            return result
-    except Exception:
-        pass
-
-    if not OPENAI_API_KEY:
-        return None
-
-    payload = {
-        "model": OPENAI_MODEL,
-        "messages": messages,
-        "temperature": 0.4,
-        "response_format": {"type": "json_object"},
-    }
-    req = request.Request(
-        "https://api.openai.com/v1/chat/completions",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {OPENAI_API_KEY}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
-
-    try:
-        with request.urlopen(req, timeout=timeout) as response:
-            body = json.loads(response.read().decode("utf-8"))
-            return json.loads(body["choices"][0]["message"]["content"])
-    except (TimeoutError, socket.timeout, error.HTTPError, error.URLError, KeyError, IndexError, json.JSONDecodeError, TypeError, ValueError, OSError):
-        return None
+def _openai_json_request(messages: list[dict], timeout: int = 30) -> dict:
+    return AgentGraphRuntime.invoke_json_response_sync(messages, timeout=timeout, temperature=0.4)
 
 
 def _generate_course_payload_with_openai(
@@ -1864,10 +1925,7 @@ def _generate_course_payload_with_openai(
     curriculum: Optional[dict],
     instruction: str,
     plan_payload: Optional[dict] = None,
-) -> Optional[dict]:
-    if not OPENAI_API_KEY:
-        return None
-
+) -> dict:
     module_target, lesson_target = _course_target_counts(course)
     total_quizzes = int(course.get("total_quizzes", course.get("totalQuizzes", 0)) or 0)
     course_context = {
@@ -1917,82 +1975,17 @@ def _generate_course_payload_with_openai(
         ],
         timeout=28,
     )
-    if not structure:
-        return None
-    return _normalize_generated_course_outline_payload(course, structure, curriculum)
-
-
-def _generate_course_payload_fallback(course: dict, instruction: str) -> dict:
-    module_target, lesson_target = _course_target_counts(course)
-    themes = _fallback_course_theme_pool(course)[:module_target]
-    duration_per_lesson = max(round(int(course.get("duration", 240) or 240) / max(lesson_target, 1)), 15)
-
-    generated_modules = []
-    for module_index, theme in enumerate(themes, start=1):
-        module_title = theme["title"]
-        generated_lessons = []
-        lesson_seeds = theme.get("lessons", []) or [
-            {
-                "title": f"{module_title} lesson",
-                "summary": f"{theme['focus']} This lesson moves the learner one clear step forward.",
-            }
-        ]
-        for lesson_index, lesson_seed in enumerate(lesson_seeds, start=1):
-            lesson_title = lesson_seed.get("title", f"{module_title} lesson {lesson_index}")
-            generated_lessons.append(
-                {
-                    "title": lesson_title,
-                    "slug": _slugify_title(f"{course['slug']}-{lesson_title}"),
-                    "source": "agent",
-                    "summary": lesson_seed.get("summary", f"{theme['focus']} This lesson moves the learner one clear step forward."),
-                    "durationMinutes": duration_per_lesson,
-                    "contentType": "lesson",
-                    "quizId": None,
-                    "quizTitle": None,
-                }
-            )
-
-        generated_modules.append(
-            {
-                "title": module_title,
-                "description": theme["focus"],
-                "order": module_index,
-                "source": "agent",
-                "lessons": generated_lessons,
-                "assessmentTitle": f"{module_title} applied checkpoint",
-                "assessmentQuizId": f"{course['slug']}-module-{module_index}-applied-check",
-            }
+    normalized = _normalize_generated_course_outline_payload(course, structure, curriculum)
+    if not normalized:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={"message": "The course generation agent returned an invalid course outline."},
         )
-
-    return {
-        "courseSlug": course["slug"],
-        "overview": (
-            f"{course['title']} helps learners progress through {course.get('description', '').strip()} "
-            "The curriculum stays concise and project-driven: each module explains the concept, demonstrates it, gives learners a guided task, and closes with a checkpoint."
-        ).strip(),
-        "modules": generated_modules,
-        "milestoneProjects": [
-            {
-                "title": f"{course['title']} guided capstone",
-                "description": "Create a practical final build that combines the most important lessons from the course into one portfolio-ready result.",
-                "milestoneOrder": 1,
-                "estimatedHours": 8 if course.get("difficulty") in {"Advanced", "Mastery"} else 6,
-                "deliverables": [
-                    "Working implementation",
-                    "README with setup and usage notes",
-                    "Short reflection on key decisions and tradeoffs",
-                ],
-                "completionThreshold": 80,
-            }
-        ],
-    }
+    return normalized
 
 
 def _build_generated_course_payload(course: dict, curriculum: Optional[dict], instruction: str, plan_payload: Optional[dict] = None) -> dict:
-    generated_curriculum = _generate_course_payload_with_openai(course, curriculum, instruction, plan_payload=plan_payload) or _generate_course_payload_fallback(
-        course,
-        instruction,
-    )
+    generated_curriculum = _generate_course_payload_with_openai(course, curriculum, instruction, plan_payload=plan_payload)
     return {
         "courseSlug": course["slug"],
         "instruction": instruction,
@@ -2088,10 +2081,10 @@ def _lesson_tutor_reply(message: str, context: dict) -> str:
     ):
         if lesson:
             return (
-                f"Hi, I’m Zara. I’m here with you in `{lesson_title}` from `{course_title}`.\n\n"
+                f"Hi, I'm Zara. I'm here with you in `{lesson_title}` from `{course_title}`.\n\n"
                 f"If you want, tell me what feels unclear and we can unpack it together in a simple way."
             )
-        return "Hi, I’m Zara. Tell me what feels confusing and we can work through it together."
+        return "Hi, I'm Zara. Tell me what feels confusing and we can work through it together."
 
     if any(
         phrase in normalized_message
@@ -2109,7 +2102,7 @@ def _lesson_tutor_reply(message: str, context: dict) -> str:
         ]
     ):
         return (
-            "Sorry you’re dealing with that. We do not need to force the lesson right now.\n\n"
+            "Sorry you're dealing with that. We do not need to force the lesson right now.\n\n"
             "If you want, we can keep things very light and focus on one small question only, or you can pause and come back later. "
             "If the headache feels strong, unusual, or keeps getting worse, please take care of yourself first and get real-world support."
         )
@@ -2118,7 +2111,7 @@ def _lesson_tutor_reply(message: str, context: dict) -> str:
         phrase in normalized_message
         for phrase in ["thanks", "thank you", "got it", "okay thanks", "ok thanks"]
     ):
-        return "You’re welcome. If another part feels unclear, send it over and we can take it one small step at a time."
+        return "You're welcome. If another part feels unclear, send it over and we can take it one small step at a time."
 
     if any(
         phrase in normalized_message
@@ -2227,7 +2220,7 @@ def _lesson_tutor_reply(message: str, context: dict) -> str:
 
     if lesson:
         return (
-            f"I’m Zara, here with you inside `{lesson['title']}` from `{course['title']}`.\n\n"
+            f"I'm Zara, here with you inside `{lesson['title']}` from `{course['title']}`.\n\n"
             f"Current focus: {lesson.get('summary', 'This lesson builds one core skill in manageable steps.')} "
             f"We can keep it practical and take only the part you need right now.\n\n"
             f"If it helps, we can take this in one of these ways:\n"
@@ -2235,24 +2228,93 @@ def _lesson_tutor_reply(message: str, context: dict) -> str:
             f"2. A small example with code.\n"
             f"3. A simple analogy or story.\n"
             f"4. A walkthrough of one confusing part.\n\n"
-            f"Tell me what feels unclear, and I’ll meet you there without rushing ahead."
+            f"Tell me what feels unclear, and I'll meet you there without rushing ahead."
         )
 
     if course:
         return (
-            f"I’m Zara, your learning support companion for `{course['title']}`. "
+            f"I'm Zara, your learning support companion for `{course['title']}`. "
             f"I can help unpack ideas with examples, analogies, and calmer step-by-step explanations.\n\n"
             f"If something feels tangled, we can start with simpler wording and build back toward the formal version together."
         )
 
     return (
-        "I’m Zara. I can support the current lesson with examples, stories, simpler rewording, and short walkthroughs. "
+        "I'm Zara. I can support the current lesson with examples, stories, simpler rewording, and short walkthroughs. "
         "You can ask something like 'Explain props in a simple way' or 'Can we walk through a small example together?'"
     )
 
 
 def _build_controlled_lesson_tutor_reply(message: str, context: dict) -> Optional[dict]:
-    return None
+    if not _lesson_tutor_general_turn(message):
+        return None
+
+    lesson = context.get("lesson") or {}
+    course = context.get("course") or {}
+    lesson_title = str(lesson.get("title") or context.get("lessonTitle") or "").strip()
+    course_title = str(course.get("title") or context.get("courseTitle") or "").strip()
+    progress = context.get("currentProgress")
+    normalized_message = _normalize_text(message)
+
+    if lesson_title and course_title:
+        scope = f"`{lesson_title}` in `{course_title}`"
+    elif lesson_title:
+        scope = f"`{lesson_title}`"
+    elif course_title:
+        scope = f"`{course_title}`"
+    else:
+        scope = "this lesson"
+
+    if not normalized_message:
+        content = "Tell me what feels fuzzy, and we can slow it down together."
+    elif normalized_message in {"hi", "hello", "hey", "good morning", "good afternoon", "good evening"} or normalized_message.startswith(("hi ", "hello ", "hey ")):
+        content = f"Hi. I'm here with you for {scope}. Tell me what feels unclear, and we'll work through it together."
+    elif _message_has_any_phrase(
+        message,
+        (
+            "headache",
+            "headacke",
+            "migraine",
+            "i am tired",
+            "im tired",
+            "feel tired",
+            "not feeling well",
+            "not okay",
+            "stressed",
+            "overwhelmed",
+        ),
+    ):
+        content = (
+            "Sorry you're dealing with that. We do not need to force the lesson right now.\n\n"
+            "If you want, we can keep this very light and focus on one small question, or you can pause and come back later. "
+            "If the headache feels strong, unusual, or keeps getting worse, please take care of yourself first and get real-world support."
+        )
+    elif _message_has_any_phrase(message, ("thanks", "thank you", "got it", "okay thanks", "ok thanks")):
+        content = "Anytime. If another part feels off, send it over and we'll take it one step at a time."
+    elif _message_has_any_phrase(message, ("who are you", "what can you do")):
+        content = (
+            f"I'm Nexa, your lesson tutor for {scope}. I can explain ideas in simpler words, give smaller examples, "
+            "and help you talk through what is confusing without rushing you."
+        )
+    elif _message_has_any_phrase(message, ("how are you", "are you there")):
+        content = "I'm here and ready to help. Tell me what part feels unclear, and we'll unpack it together."
+    elif _message_has_any_phrase(message, ("can you help me", "i need help", "help me")):
+        if isinstance(progress, int):
+            content = f"Yes. I've got your {scope} context and your current progress at {progress}%. Tell me what part feels confusing."
+        else:
+            content = f"Yes. I'm here for {scope}. Tell me what feels confusing, and we'll break it down together."
+    else:
+        content = (
+            "That sounds frustrating. We can slow it down and take one piece at a time.\n\n"
+            "If you want, tell me the exact part that feels stuck, or paste the code and I'll help you narrow it down."
+        )
+
+    return {
+        "content": content,
+        "metadata": {
+            "provider": "deveda-controlled",
+            "mode": "conversation",
+        },
+    }
 
 
 def _platform_support_reply(message: str, context: dict) -> str:
@@ -2467,19 +2529,27 @@ async def _build_course_catalog_draft_payload(
             },
         ],
         timeout=18,
-    ) or {}
+    )
 
-    title = str(generated.get("title") or draft_payload.get("title") or _extract_course_title(message) or "New Course").strip()
-    category = str(generated.get("category") or draft_payload.get("category") or _infer_course_category(message)).strip() or "Frontend Development"
-    difficulty = str(generated.get("difficulty") or draft_payload.get("difficulty") or _infer_course_difficulty(message)).strip() or "Beginner"
-    description = str(
-        generated.get("description")
-        or draft_payload.get("description")
-        or (
-            f"{title} is a {difficulty.lower()} {category.lower()} course on Deveda. "
-            "It is structured with guided lessons, checkpoint quizzes, and milestone practice so learners can build confidence step by step."
+    title = str(generated.get("title") or "").strip()
+    category = str(generated.get("category") or "").strip()
+    difficulty = str(generated.get("difficulty") or "").strip()
+    description = str(generated.get("description") or "").strip()
+    if not title or not category or not difficulty or not description:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={"message": "The course drafting agent returned incomplete course metadata."},
         )
-    ).strip()
+
+    try:
+        duration = int(generated.get("duration"))
+        total_lessons = int(generated.get("totalLessons"))
+        total_quizzes = int(generated.get("totalQuizzes"))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={"message": "The course drafting agent returned invalid numeric fields."},
+        ) from exc
 
     base_slug = _slugify_title(str(draft_payload.get("slug") or generated.get("slug") or title))
     slug = base_slug
@@ -2494,12 +2564,12 @@ async def _build_course_catalog_draft_payload(
         "description": description,
         "category": category,
         "difficulty": difficulty,
-        "duration": int(generated.get("duration") or draft_payload.get("duration") or 240),
-        "totalLessons": int(generated.get("totalLessons") or draft_payload.get("totalLessons") or 12),
-        "totalQuizzes": int(generated.get("totalQuizzes") or draft_payload.get("totalQuizzes") or 4),
+        "duration": duration,
+        "totalLessons": total_lessons,
+        "totalQuizzes": total_quizzes,
         "instructor": str(draft_payload.get("instructor") or _actor_label(current_user)),
-        "prerequisites": _coerce_string_list(generated.get("prerequisites"), draft_payload.get("prerequisites") or []),
-        "tags": _coerce_string_list(generated.get("tags"), draft_payload.get("tags") or _default_course_tags(category, title)),
+        "prerequisites": _coerce_string_list(generated.get("prerequisites"), []),
+        "tags": _coerce_string_list(generated.get("tags"), []),
         "thumbnail": str(draft_payload.get("thumbnail") or ""),
         "thumbnailPublicId": str(draft_payload.get("thumbnailPublicId") or ""),
     }
@@ -2752,20 +2822,6 @@ def _supports_planning_note_request(message: str) -> bool:
     return any(keyword in lowered for keyword in ["save planning note", "save lesson plan", "save note", "planning note", "lesson note"])
 
 
-def _fallback_reply(agent_type: str, message: str, context: dict) -> str:
-    direct_reply = _deterministic_reply(agent_type, message, context)
-    if direct_reply:
-        return direct_reply
-
-    if agent_type == "course_builder":
-        return _course_builder_reply(message, context)
-    if agent_type == "progress_analyst":
-        return _progress_analyst_reply(message, context)
-    if agent_type == "lesson_tutor":
-        return _lesson_tutor_unavailable_reply(context)
-    return _platform_support_reply(message, context)
-
-
 def _system_prompt(agent_type: str, context: dict) -> str:
     if agent_type == "course_builder":
         return "You are Deveda's Course Builder agent. Always use the provided platform context first. If a course is present in context, never say you lack access to course details."
@@ -2775,14 +2831,15 @@ def _system_prompt(agent_type: str, context: dict) -> str:
         return (
             "You are Zara, Deveda's learner support companion. "
             "Be warm, calm, and encouraging. Support rather than command. "
-            "Avoid bossy or overly directive phrasing. Prefer collaborative language like 'we can', 'it may help to', and 'if you want'. "
-            "Write in simple, clear English that works for teenagers as well as adults. "
+            "Prefer collaborative language like 'we can', 'let's look at it', and 'if you want'. "
+            "Write in simple, natural English that works for teenagers as well as adults. "
             "Use short sentences, plain words, and natural grammar. "
-            "Avoid jargon, formal academic wording, and complex sentence structure. "
-            "If you must use a technical word, explain it right away in simple language. "
-            "Keep the response easy to scan and focus on one idea at a time. "
-            "Explain clearly, kindly, and concretely, using the provided lesson and course context before answering. "
-            "Answer the learner's latest message directly. Do not repeatedly introduce yourself, and do not default to canned menus, numbered option lists, or demo prompts unless the learner explicitly asks for options."
+            "Avoid jargon, formal academic wording, canned menus, and numbered option lists unless the learner explicitly asks for them. "
+            "If the learner is greeting you, thanking you, venting, or making small talk, reply naturally and briefly without forcing lesson details into the answer. "
+            "If the learner asks about the current lesson, quiz, code, or progress, use the provided context first and stay grounded in it. "
+            "If the provided context is missing or not enough, say that plainly and ask for the missing detail instead of inventing. "
+            "If the learner asks for platform navigation or account help, tell them Platform Support is the better assistant for that task. "
+            "Answer the learner's latest message directly, and make the reply feel like a real study partner rather than a scripted chatbot."
         )
     return "You are Deveda's Platform Support agent. Help users navigate the product and understand where to go next. Use the current platform map from context instead of generic guesses."
 
@@ -2803,40 +2860,10 @@ def _build_openai_messages(agent_type: str, context: dict, history: list[dict], 
     return messages
 
 
-def _call_openai(agent_type: str, context: dict, history: list[dict], user_message: str) -> Optional[dict]:
+def _call_openai(agent_type: str, context: dict, history: list[dict], user_message: str) -> dict:
     messages = _build_openai_messages(agent_type, context, history, user_message)
-    try:
-        content = AgentGraphRuntime.invoke_text_response_sync(messages, timeout=25, temperature=0.7)
-        if content:
-            return {"content": content, "metadata": {"provider": "openai", "model": OPENAI_MODEL, "orchestrator": "langgraph"}}
-    except Exception:
-        pass
-
-    if not OPENAI_API_KEY:
-        return None
-
-    payload = {
-        "model": OPENAI_MODEL,
-        "messages": messages,
-        "temperature": 0.7,
-    }
-    req = request.Request(
-        "https://api.openai.com/v1/chat/completions",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {OPENAI_API_KEY}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
-
-    try:
-        with request.urlopen(req, timeout=25) as response:
-            body = json.loads(response.read().decode("utf-8"))
-            content = body["choices"][0]["message"]["content"].strip()
-            return {"content": content, "metadata": {"provider": "openai", "model": OPENAI_MODEL}}
-    except (error.HTTPError, error.URLError, KeyError, IndexError, json.JSONDecodeError):
-        return None
+    content = AgentGraphRuntime.invoke_text_response_sync(messages, timeout=25, temperature=0.7)
+    return {"content": content, "metadata": {"provider": "openai", "model": OPENAI_MODEL, "orchestrator": "langgraph"}}
 
 
 async def _build_context_bundle(assignment: dict, message_payload: AgentMessageCreate) -> tuple[dict, list[str]]:
@@ -2847,19 +2874,32 @@ async def _build_context_bundle(assignment: dict, message_payload: AgentMessageC
 
     context: dict[str, Any] = {}
 
-    if assignment["agent_type"] in {"lesson_tutor", "course_builder"}:
-        context.update(await _collect_course_context(course_slug, lesson_slug, message_payload.message))
-        tools_used.append("scan_course_content")
+    if assignment["agent_type"] in {"lesson_tutor", "course_builder"} and _should_collect_course_context(
+        assignment["agent_type"],
+        message_payload.message,
+        course_slug,
+        lesson_slug,
+    ):
+        course_context = await _collect_course_context(course_slug, lesson_slug, message_payload.message)
+        context.update(course_context)
+        if course_context:
+            tools_used.append("scan_course_content")
 
     if assignment["agent_type"] == "progress_analyst":
-        context.update(await _collect_progress_context(target_user_id))
-        tools_used.append("scan_student_progress")
+        progress_context = await _collect_progress_context(target_user_id)
+        context.update(progress_context)
+        if progress_context:
+            tools_used.append("scan_student_progress")
 
     if assignment["agent_type"] == "platform_support":
         requester = await _get_user_or_404(assignment["user_id"])
-        context.update(await _collect_platform_context(requester))
-        tools_used.append("scan_platform_map")
+        platform_context = await _collect_platform_context(requester)
+        context.update(platform_context)
+        if platform_context:
+            tools_used.append("scan_platform_map")
 
+    if message_payload.courseTitle:
+        context["courseTitle"] = message_payload.courseTitle
     if message_payload.lessonTitle:
         context["lessonTitle"] = message_payload.lessonTitle
     if message_payload.currentProgress is not None:
@@ -3167,47 +3207,7 @@ def _resolve_working_lesson_context(context: dict) -> Optional[dict]:
     return None
 
 
-def _build_fallback_module_payload(course: dict, module: dict, module_order: int, instruction: str) -> dict:
-    seed_module = module if module and not _is_generic_title(str(module.get("title", ""))) and not _is_scaffold_origin(module) else _module_generation_seed(
-        course,
-        {"modules": [module] if module else []},
-        module_order,
-    )
-    module_title = seed_module.get("title", f"Module {module_order}")
-    lessons = seed_module.get("lessons", []) if isinstance(seed_module.get("lessons"), list) and seed_module.get("lessons") else [
-        {
-            "title": f"{module_title} foundations",
-            "slug": _slugify_title(f"{course['slug']}-{module_title}-foundations"),
-            "summary": f"Introduce the main idea in {module_title}.",
-            "durationMinutes": 20,
-            "contentType": "lesson",
-        }
-    ]
-    generated_lessons = []
-    for lesson_index, lesson in enumerate(lessons, start=1):
-        lesson_context = {
-            **lesson,
-            "title": lesson.get("title", f"{module_title} lesson {lesson_index}"),
-            "slug": lesson.get("slug", _slugify_title(f"{course['slug']}-{module_title}-lesson-{lesson_index}")),
-            "summary": lesson.get("summary", f"Use {module_title} in a practical way."),
-            "durationMinutes": lesson.get("durationMinutes", 20),
-            "contentType": lesson.get("contentType", "lesson"),
-            "moduleTitle": module_title,
-        }
-        lesson_plan = _build_lesson_content_plan_payload(course, lesson_context, f"{instruction} Build complete lesson content for {lesson_context['title']}.")
-        generated_lessons.append(_build_generated_lesson_payload(course, lesson_context, lesson_plan))
-
-    return {
-        "title": module_title,
-        "description": seed_module.get("description") or f"Guide learners through {module_title.lower()} with real examples, guided repetition, and a checkpoint.",
-        "order": seed_module.get("order", module_order),
-        "lessons": generated_lessons,
-        "assessmentTitle": seed_module.get("assessmentTitle") or f"{module_title} applied checkpoint",
-        "assessmentQuizId": seed_module.get("assessmentQuizId") or f"{course['slug']}-module-{module_order}-applied-check",
-    }
-
-
-def _generate_module_payload_with_openai(course: dict, curriculum: dict, module: dict, module_order: int, instruction: str) -> Optional[dict]:
+def _generate_module_payload_with_openai(course: dict, curriculum: dict, module: dict, module_order: int, instruction: str) -> dict:
     module_seed = _merge_module_with_seed(course, curriculum, module, module_order)
     context_payload = {
         "course": {
@@ -3271,14 +3271,11 @@ async def _create_generated_module_content_artifact(
     modules = working_curriculum.get("modules", [])
     base_module = modules[module_index] if module_index < len(modules) else {"title": f"Module {payload.moduleOrder}", "lessons": []}
     generated_module = _generate_module_payload_with_openai(course, working_curriculum, base_module, payload.moduleOrder, instruction)
-    if generated_module:
-        generated_module = _merge_module_with_seed(course, working_curriculum, generated_module, payload.moduleOrder)
-    if not generated_module or _is_generic_title(str(generated_module.get("title", ""))):
-        generated_module = _build_fallback_module_payload(
-            course,
-            base_module,
-            payload.moduleOrder,
-            instruction,
+    generated_module = _merge_module_with_seed(course, working_curriculum, generated_module, payload.moduleOrder)
+    if _is_generic_title(str(generated_module.get("title", ""))):
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={"message": "The module generation agent returned a generic module title."},
         )
     normalized_module = _normalize_generated_module_payload(course, generated_module, payload.moduleOrder)
     artifact_payload = {
@@ -3336,22 +3333,30 @@ async def _create_generated_question_content_artifact(
             },
         ],
         timeout=18,
-    ) or {}
+    )
+
+    question_text = str(question_payload.get("question") or "").strip()
+    explanation = str(question_payload.get("explanation") or "").strip()
+    options = _coerce_string_list(question_payload.get("options"), [])[:4]
+    correct_answer = str(question_payload.get("correctAnswer") or "").strip()
+    if not question_text or not explanation or len(options) < 2 or not correct_answer or correct_answer not in options:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={"message": "The question generation agent returned an incomplete question draft."},
+        )
 
     resolved_payload = {
         "quizId": quiz_id,
-        "question": str(question_payload.get("question") or instruction or "What is the main idea behind this topic?").strip(),
-        "options": _coerce_string_list(question_payload.get("options"), ["Option A", "Option B", "Option C", "Option D"])[:4],
-        "correctAnswer": str(question_payload.get("correctAnswer") or "").strip(),
-        "explanation": str(question_payload.get("explanation") or "Explain why the correct option is right and why the distractors are wrong.").strip(),
+        "question": question_text,
+        "options": options,
+        "correctAnswer": correct_answer,
+        "explanation": explanation,
         "points": int(question_payload.get("points") or draft_payload.get("points") or 1),
         "timeLimit": int(question_payload.get("timeLimit") or draft_payload.get("timeLimit") or 60),
         "questionType": str(question_payload.get("questionType") or draft_payload.get("questionType") or "multiple_choice"),
         "difficulty": str(question_payload.get("difficulty") or draft_payload.get("difficulty") or "Medium"),
         "isActive": bool(question_payload.get("isActive", draft_payload.get("isActive", True))),
     }
-    if resolved_payload["correctAnswer"] not in resolved_payload["options"]:
-        resolved_payload["correctAnswer"] = resolved_payload["options"][0]
 
     summary = f"Generated a question draft for quiz {quiz_id} that can be reviewed and submitted directly."
     return await _store_artifact(
@@ -3808,7 +3813,6 @@ class AgentService:
                     },
                 )
 
-        user_message = await _store_message(thread["_id"], "user", payload.message)
         history = await _fetch_recent_messages(thread["_id"])
         run = await _start_agent_run(
             assignment,
@@ -3829,14 +3833,14 @@ class AgentService:
                 current_user,
                 history,
             )
-            fallback_context = graph_result.get("context")
-            if fallback_context is None:
-                fallback_context, _ = await _build_context_bundle(assignment, payload)
-            ai_reply = graph_result.get("reply") or {
-                "content": _fallback_reply(assignment["agent_type"], payload.message, fallback_context),
-                "metadata": {"provider": "deveda-fallback", "orchestrator": "langgraph"},
-            }
+            ai_reply = graph_result.get("reply")
+            if not ai_reply or not str(ai_reply.get("content", "")).strip():
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail={"message": "The agent did not return a reply."},
+                )
 
+            user_message = await _store_message(thread["_id"], "user", payload.message)
             assistant_message = await _store_message(thread["_id"], "assistant", ai_reply["content"], ai_reply["metadata"])
             await agent_threads_collection.update_one(
                 {"_id": thread["_id"]},

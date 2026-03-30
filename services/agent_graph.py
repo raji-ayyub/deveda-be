@@ -5,6 +5,7 @@ import os
 from functools import lru_cache
 from typing import Any, Optional
 
+from fastapi import HTTPException, status
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph
@@ -80,9 +81,12 @@ def _to_langchain_messages(messages: list[dict]) -> list[Any]:
     return converted
 
 
-def _build_chat_model(*, timeout: int, temperature: float, json_mode: bool = False) -> Optional[ChatOpenAI]:
+def _build_chat_model(*, timeout: int, temperature: float, json_mode: bool = False) -> ChatOpenAI:
     if not OPENAI_API_KEY:
-        return None
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"message": "The agent model is not configured right now."},
+        )
 
     model_kwargs = {"response_format": {"type": "json_object"}} if json_mode else {}
     return ChatOpenAI(
@@ -96,58 +100,86 @@ def _build_chat_model(*, timeout: int, temperature: float, json_mode: bool = Fal
 
 class AgentGraphRuntime:
     @staticmethod
-    def invoke_text_response_sync(messages: list[dict], *, timeout: int = 25, temperature: float = 0.7) -> Optional[str]:
+    def invoke_text_response_sync(messages: list[dict], *, timeout: int = 25, temperature: float = 0.7) -> str:
         model = _build_chat_model(timeout=timeout, temperature=temperature)
-        if model is None:
-            return None
-
         try:
             response = model.invoke(_to_langchain_messages(messages))
-        except Exception:
-            return None
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={"message": "The agent model could not generate a response right now."},
+            ) from exc
 
         content = _content_to_text(response.content)
-        return content or None
+        if not content:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={"message": "The agent model returned an empty response."},
+            )
+        return content
 
     @staticmethod
-    async def invoke_text_response(messages: list[dict], *, timeout: int = 25, temperature: float = 0.7) -> Optional[str]:
+    async def invoke_text_response(messages: list[dict], *, timeout: int = 25, temperature: float = 0.7) -> str:
         model = _build_chat_model(timeout=timeout, temperature=temperature)
-        if model is None:
-            return None
-
         try:
             response = await model.ainvoke(_to_langchain_messages(messages))
-        except Exception:
-            return None
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={"message": "The agent model could not generate a response right now."},
+            ) from exc
 
         content = _content_to_text(response.content)
-        return content or None
+        if not content:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={"message": "The agent model returned an empty response."},
+            )
+        return content
 
     @staticmethod
-    def invoke_json_response_sync(messages: list[dict], *, timeout: int = 30, temperature: float = 0.4) -> Optional[dict]:
+    def invoke_json_response_sync(messages: list[dict], *, timeout: int = 30, temperature: float = 0.4) -> dict:
         model = _build_chat_model(timeout=timeout, temperature=temperature, json_mode=True)
-        if model is None:
-            return None
-
         try:
             response = model.invoke(_to_langchain_messages(messages))
             content = _content_to_text(response.content)
             return json.loads(content)
-        except Exception:
-            return None
+        except HTTPException:
+            raise
+        except json.JSONDecodeError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={"message": "The agent model returned invalid JSON."},
+            ) from exc
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={"message": "The agent model could not generate a structured response right now."},
+            ) from exc
 
     @staticmethod
-    async def invoke_json_response(messages: list[dict], *, timeout: int = 30, temperature: float = 0.4) -> Optional[dict]:
+    async def invoke_json_response(messages: list[dict], *, timeout: int = 30, temperature: float = 0.4) -> dict:
         model = _build_chat_model(timeout=timeout, temperature=temperature, json_mode=True)
-        if model is None:
-            return None
-
         try:
             response = await model.ainvoke(_to_langchain_messages(messages))
             content = _content_to_text(response.content)
             return json.loads(content)
-        except Exception:
-            return None
+        except HTTPException:
+            raise
+        except json.JSONDecodeError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={"message": "The agent model returned invalid JSON."},
+            ) from exc
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={"message": "The agent model could not generate a structured response right now."},
+            ) from exc
 
     @staticmethod
     async def _load_chat_context(state: AgentChatState) -> AgentChatState:
@@ -196,6 +228,11 @@ class AgentGraphRuntime:
                 state["thread"]["_id"],
                 state["current_user"],
             )
+        elif state["assignment"]["agent_type"] == "lesson_tutor":
+            reply = agent._build_controlled_lesson_tutor_reply(
+                state["payload"].message,
+                state.get("context", {}),
+            )
         return {
             "controlled_reply": reply,
             "steps": _append_step(state, "controlled_reply"),
@@ -215,19 +252,14 @@ class AgentGraphRuntime:
             state["payload"].message,
         )
         content = await AgentGraphRuntime.invoke_text_response(messages, timeout=25, temperature=0.7)
-        ai_reply = (
-            {
+        return {
+            "ai_reply": {
                 "content": content,
                 "metadata": {
                     "provider": "openai",
                     "model": OPENAI_MODEL,
                 },
-            }
-            if content
-            else None
-        )
-        return {
-            "ai_reply": ai_reply,
+            },
             "steps": _append_step(state, "generate_llm_reply"),
         }
 
@@ -247,14 +279,10 @@ class AgentGraphRuntime:
                     "metadata": {"provider": "deveda-deterministic"},
                 }
             else:
-                reply = {
-                    "content": agent._fallback_reply(
-                        state["assignment"]["agent_type"],
-                        state["payload"].message,
-                        state.get("context", {}),
-                    ),
-                    "metadata": {"provider": "deveda-fallback"},
-                }
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail={"message": "The agent did not produce a response."},
+                )
 
         metadata = dict(reply.get("metadata") or {})
         metadata["toolsUsed"] = state.get("tools_used", [])
