@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from functools import lru_cache
 from typing import Any, Optional
 
@@ -81,6 +82,31 @@ def _to_langchain_messages(messages: list[dict]) -> list[Any]:
     return converted
 
 
+def _safe_model_error_message(exc: Exception, *, structured: bool = False) -> str:
+    raw = re.sub(r"\s+", " ", str(exc or "")).strip()
+    if not raw:
+        return (
+            "The agent model could not generate a structured response right now."
+            if structured
+            else "The agent model could not generate a response right now."
+        )
+
+    lowered = raw.lower()
+    if "401" in lowered or "invalid api key" in lowered or "incorrect api key" in lowered or "authentication" in lowered:
+        return "The agent model credentials are invalid or missing on the server."
+    if "429" in lowered or "rate limit" in lowered or "quota" in lowered:
+        return "The agent model is rate-limited right now. Please try again shortly."
+    if "context_length" in lowered or "maximum context length" in lowered or "too many tokens" in lowered:
+        return "The agent request was too large for the model context window."
+    if "model_not_found" in lowered or "does not exist" in lowered:
+        return "The configured agent model is not available for this deployment."
+    if "timeout" in lowered or "timed out" in lowered:
+        return "The agent model timed out while generating a response."
+    if "connection" in lowered or "api connection" in lowered or "dns" in lowered or "network" in lowered:
+        return "The server could not reach the agent model provider."
+    return raw[:280]
+
+
 def _build_chat_model(*, timeout: int, temperature: float, json_mode: bool = False) -> ChatOpenAI:
     if not OPENAI_API_KEY:
         raise HTTPException(
@@ -109,7 +135,7 @@ class AgentGraphRuntime:
         except Exception as exc:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail={"message": "The agent model could not generate a response right now."},
+                detail={"message": _safe_model_error_message(exc)},
             ) from exc
 
         content = _content_to_text(response.content)
@@ -130,7 +156,7 @@ class AgentGraphRuntime:
         except Exception as exc:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail={"message": "The agent model could not generate a response right now."},
+                detail={"message": _safe_model_error_message(exc)},
             ) from exc
 
         content = _content_to_text(response.content)
@@ -158,7 +184,7 @@ class AgentGraphRuntime:
         except Exception as exc:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail={"message": "The agent model could not generate a structured response right now."},
+                detail={"message": _safe_model_error_message(exc, structured=True)},
             ) from exc
 
     @staticmethod
@@ -178,7 +204,7 @@ class AgentGraphRuntime:
         except Exception as exc:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail={"message": "The agent model could not generate a structured response right now."},
+                detail={"message": _safe_model_error_message(exc, structured=True)},
             ) from exc
 
     @staticmethod

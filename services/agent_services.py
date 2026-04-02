@@ -196,6 +196,150 @@ def _should_collect_course_context(agent_type: str, message: str, course_slug: O
     return not _lesson_tutor_general_turn(message)
 
 
+def _truncate_text(value: Any, limit: int = 320) -> str:
+    text = str(value or "").strip()
+    if len(text) <= limit:
+        return text
+    return text[: max(limit - 3, 0)].rstrip() + "..."
+
+
+def _compact_course_context(course: Optional[dict]) -> dict:
+    if not course:
+        return {}
+    return {
+        "title": course.get("title"),
+        "slug": course.get("slug"),
+        "description": _truncate_text(course.get("description"), 280),
+        "category": course.get("category"),
+        "difficulty": course.get("difficulty"),
+        "duration": course.get("duration", course.get("durationMinutes")),
+        "tags": list(course.get("tags", [])[:6]) if isinstance(course.get("tags"), list) else [],
+        "prerequisites": list(course.get("prerequisites", [])[:6]) if isinstance(course.get("prerequisites"), list) else [],
+    }
+
+
+def _compact_lesson_context(lesson: Optional[dict]) -> dict:
+    if not lesson:
+        return {}
+    return {
+        "title": lesson.get("title"),
+        "slug": lesson.get("slug"),
+        "moduleTitle": lesson.get("moduleTitle"),
+        "moduleOrder": lesson.get("moduleOrder"),
+        "summary": _truncate_text(lesson.get("summary"), 260),
+        "durationMinutes": lesson.get("durationMinutes"),
+        "contentType": lesson.get("contentType"),
+        "learningObjectives": list(lesson.get("learningObjectives", [])[:5]) if isinstance(lesson.get("learningObjectives"), list) else [],
+        "keyTakeaways": list(lesson.get("keyTakeaways", [])[:5]) if isinstance(lesson.get("keyTakeaways"), list) else [],
+        "practicePrompt": _truncate_text(lesson.get("practicePrompt"), 220),
+    }
+
+
+def _compact_curriculum_context(curriculum: Optional[dict], *, module_limit: int = 6, lesson_limit: int = 4) -> dict:
+    if not curriculum:
+        return {}
+
+    raw_modules = curriculum.get("modules", [])
+    modules = raw_modules if isinstance(raw_modules, list) else []
+    compact_modules = []
+    for module in modules[:module_limit]:
+        raw_lessons = module.get("lessons", [])
+        lessons = raw_lessons if isinstance(raw_lessons, list) else []
+        compact_modules.append(
+            {
+                "title": module.get("title"),
+                "order": module.get("order"),
+                "description": _truncate_text(module.get("description"), 180),
+                "assessmentTitle": module.get("assessmentTitle"),
+                "lessons": [
+                    {
+                        "title": lesson.get("title"),
+                        "slug": lesson.get("slug"),
+                        "summary": _truncate_text(lesson.get("summary"), 120),
+                    }
+                    for lesson in lessons[:lesson_limit]
+                ],
+            }
+        )
+
+    milestone_source = curriculum.get("milestone_projects", curriculum.get("milestoneProjects", []))
+    milestones = milestone_source if isinstance(milestone_source, list) else []
+    return {
+        "overview": _truncate_text(curriculum.get("overview"), 240),
+        "moduleCount": len(modules),
+        "modules": compact_modules,
+        "milestones": [
+            {
+                "title": item.get("title"),
+                "description": _truncate_text(item.get("description"), 140),
+            }
+            for item in milestones[:3]
+        ],
+    }
+
+
+def _model_context(agent_type: str, context: dict) -> dict:
+    if agent_type == "lesson_tutor":
+        return {
+            "course": _compact_course_context(context.get("course")),
+            "lesson": _compact_lesson_context(context.get("lesson")),
+            "curriculum": _compact_curriculum_context(context.get("curriculum"), module_limit=4, lesson_limit=3),
+            "courseTitle": context.get("courseTitle"),
+            "lessonTitle": context.get("lessonTitle"),
+            "currentProgress": context.get("currentProgress"),
+        }
+
+    if agent_type == "course_builder":
+        return {
+            "course": _compact_course_context(context.get("course")),
+            "curriculum": _compact_curriculum_context(context.get("curriculum"), module_limit=8, lesson_limit=5),
+            "matchedCourseSlug": context.get("matchedCourseSlug"),
+        }
+
+    if agent_type == "progress_analyst":
+        summary = context.get("summary", {}) if isinstance(context.get("summary"), dict) else {}
+        learner = context.get("learner", {}) if isinstance(context.get("learner"), dict) else {}
+        return {
+            "learner": {
+                "firstName": learner.get("firstName"),
+                "lastName": learner.get("lastName"),
+                "email": learner.get("email"),
+            },
+            "summary": summary,
+            "recentCourses": [
+                {
+                    "course_slug": item.get("course_slug"),
+                    "progress": item.get("progress"),
+                    "completed": item.get("completed"),
+                }
+                for item in (context.get("courses", []) if isinstance(context.get("courses"), list) else [])[:6]
+            ],
+            "recentQuizzes": [
+                {
+                    "quiz_id": item.get("quiz_id"),
+                    "score": item.get("score"),
+                    "passed": item.get("passed"),
+                }
+                for item in (context.get("quizzes", []) if isinstance(context.get("quizzes"), list) else [])[:6]
+            ],
+        }
+
+    if agent_type == "platform_support":
+        return {
+            "courseCount": context.get("courseCount"),
+            "areas": [
+                {
+                    "name": area.get("name"),
+                    "route": area.get("route"),
+                    "description": _truncate_text(area.get("description"), 120),
+                }
+                for area in (context.get("areas", []) if isinstance(context.get("areas"), list) else [])[:10]
+            ],
+        }
+
+    return context
+
+
 def _slugify_title(value: str) -> str:
     normalized = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
     return normalized or "new-course"
@@ -2846,7 +2990,7 @@ def _system_prompt(agent_type: str, context: dict) -> str:
 
 def _build_openai_messages(agent_type: str, context: dict, history: list[dict], user_message: str) -> list[dict]:
     messages = [{"role": "system", "content": _system_prompt(agent_type, context)}]
-    context_payload = json.dumps(context, default=str)
+    context_payload = json.dumps(_model_context(agent_type, context), default=str)
     messages.append({"role": "system", "content": f"Current context: {context_payload}"})
     recent_history = history[-6:]
     for item in recent_history:
