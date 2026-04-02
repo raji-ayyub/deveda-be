@@ -25,6 +25,7 @@ def _lesson(
     practice: str,
     visual: str = "",
     content_type: str = "lesson",
+    game_key: str | None = None,
     playground: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
@@ -46,6 +47,8 @@ def _lesson(
         "practicePrompt": practice,
         "instructorNotes": "Seeded milestone lesson.",
     }
+    if game_key is not None:
+        payload["gameKey"] = game_key
     if playground is not None:
         payload["playground"] = playground
     return payload
@@ -1137,6 +1140,42 @@ def _curriculum_looks_like_scaffold(curriculum: dict[str, Any] | None) -> bool:
     )
 
 
+def _curriculum_missing_lesson_games(curriculum: dict[str, Any] | None, expected_games: dict[str, str]) -> bool:
+    if not curriculum:
+        return True
+
+    configured: dict[str, str] = {}
+    for module in curriculum.get("modules", []):
+        for lesson in module.get("lessons", []):
+            lesson_slug = str(lesson.get("slug") or "").strip()
+            game_key = str(lesson.get("gameKey") or "").strip()
+            if lesson_slug and game_key:
+                configured[lesson_slug] = game_key
+
+    for lesson_slug, game_key in expected_games.items():
+        if configured.get(lesson_slug) != game_key:
+            return True
+    return False
+
+
+def _merge_lesson_game_keys(curriculum: dict[str, Any], template: dict[str, Any]) -> dict[str, Any]:
+    template_game_keys: dict[str, str] = {}
+    for module in template.get("modules", []):
+        for lesson in module.get("lessons", []):
+            lesson_slug = str(lesson.get("slug") or "").strip()
+            game_key = str(lesson.get("gameKey") or "").strip()
+            if lesson_slug and game_key:
+                template_game_keys[lesson_slug] = game_key
+
+    merged = deepcopy(curriculum)
+    for module in merged.get("modules", []):
+        for lesson in module.get("lessons", []):
+            lesson_slug = str(lesson.get("slug") or "").strip()
+            if lesson_slug in template_game_keys:
+                lesson["gameKey"] = template_game_keys[lesson_slug]
+    return merged
+
+
 async def _replace_seed_questions(quiz_id: str, questions: list[dict[str, Any]], created_by: str) -> None:
     await quiz_questions_collection.delete_many({"quiz_id": quiz_id})
     created_at = datetime.utcnow()
@@ -1252,7 +1291,16 @@ async def ensure_frontend_development_foundations_seed() -> None:
 
     existing_course = await course_catalog_collection.find_one({"slug": FOUNDATIONS_COURSE_SLUG})
     existing_curriculum = await course_curricula_collection.find_one({"course_slug": FOUNDATIONS_COURSE_SLUG})
-    should_upgrade_curriculum = _curriculum_looks_like_scaffold(existing_curriculum)
+    expected_games = {
+        f"{FOUNDATIONS_COURSE_SLUG}-semantic-structure-audit": "semantic-sleuth",
+        f"{FOUNDATIONS_COURSE_SLUG}-css-grid-two-dimensional-layouts": "grid-studio",
+        f"{FOUNDATIONS_COURSE_SLUG}-hover-focus-success-error-states": "ui-mood-runway",
+        f"{FOUNDATIONS_COURSE_SLUG}-array-methods-transform-interface-data": "data-remix-club",
+        f"{FOUNDATIONS_COURSE_SLUG}-fetch-data-with-ui-states": "signal-rescue-mission",
+    }
+    scaffold_upgrade_needed = _curriculum_looks_like_scaffold(existing_curriculum)
+    game_metadata_refresh_needed = _curriculum_missing_lesson_games(existing_curriculum, expected_games)
+    should_upgrade_curriculum = scaffold_upgrade_needed or game_metadata_refresh_needed
 
     if not existing_course:
         course_document = {
@@ -1278,8 +1326,9 @@ async def ensure_frontend_development_foundations_seed() -> None:
         result = await course_catalog_collection.insert_one(course_document)
         course_document["_id"] = result.inserted_id
         existing_course = course_document
+        scaffold_upgrade_needed = True
         should_upgrade_curriculum = True
-    elif should_upgrade_curriculum:
+    elif scaffold_upgrade_needed:
         await course_catalog_collection.update_one(
             {"slug": FOUNDATIONS_COURSE_SLUG},
             {
@@ -1304,15 +1353,25 @@ async def ensure_frontend_development_foundations_seed() -> None:
         existing_course = await course_catalog_collection.find_one({"slug": FOUNDATIONS_COURSE_SLUG})
 
     if should_upgrade_curriculum:
-        curriculum_document = deepcopy(FOUNDATIONS_CURRICULUM_TEMPLATE)
-        curriculum_document.update(
-            {
-                "course_slug": FOUNDATIONS_COURSE_SLUG,
-                "updated_at": now,
-                "updated_by": FOUNDATIONS_SEED_AUTHOR,
-                "is_draft_scaffold": False,
-            }
-        )
+        if scaffold_upgrade_needed:
+            curriculum_document = deepcopy(FOUNDATIONS_CURRICULUM_TEMPLATE)
+            curriculum_document.update(
+                {
+                    "course_slug": FOUNDATIONS_COURSE_SLUG,
+                    "updated_at": now,
+                    "updated_by": FOUNDATIONS_SEED_AUTHOR,
+                    "is_draft_scaffold": False,
+                }
+            )
+        else:
+            curriculum_document = _merge_lesson_game_keys(existing_curriculum or {}, FOUNDATIONS_CURRICULUM_TEMPLATE)
+            curriculum_document.update(
+                {
+                    "course_slug": FOUNDATIONS_COURSE_SLUG,
+                    "updated_at": now,
+                    "updated_by": FOUNDATIONS_SEED_AUTHOR,
+                }
+            )
         await course_curricula_collection.update_one(
             {"course_slug": FOUNDATIONS_COURSE_SLUG},
             {"$set": curriculum_document},
@@ -1323,7 +1382,7 @@ async def ensure_frontend_development_foundations_seed() -> None:
     if existing_course and existing_curriculum:
         await LessonLibraryService.sync_course_lessons(existing_course, existing_curriculum, FOUNDATIONS_SEED_AUTHOR)
 
-    if not should_upgrade_curriculum:
+    if not scaffold_upgrade_needed:
         return
 
     for quiz_id, questions in FOUNDATIONS_QUIZ_BANK.items():
@@ -1379,6 +1438,7 @@ FOUNDATIONS_CURRICULUM_TEMPLATE: dict[str, Any] = {
                     ),
                     practice="Take one small page you already built and rewrite at least three generic wrappers into clearer semantic sections.",
                     visual="## Visual aid\n`Current structure` -> `Audit` -> `Clearer document outline`",
+                    game_key="semantic-sleuth",
                 ),
                 _lesson(
                     title="Use lists, grouped content, and supporting copy intentionally",
@@ -1441,6 +1501,7 @@ FOUNDATIONS_CURRICULUM_TEMPLATE: dict[str, Any] = {
                     ),
                     practice="Build a simple dashboard or feature area using Grid with clear row and column spacing.",
                     visual="## Visual aid\n`Two-dimensional layout` -> `Grid tracks` -> `Structured interface`",
+                    game_key="grid-studio",
                     playground=_web_playground(
                         "Create a simple two-column grid section.",
                         "<section class=\"dashboard-grid\">\n  <article class=\"panel\">Overview</article>\n  <article class=\"panel\">Progress</article>\n  <article class=\"panel\">Tasks</article>\n  <article class=\"panel\">Notes</article>\n</section>",
@@ -1532,6 +1593,7 @@ FOUNDATIONS_CURRICULUM_TEMPLATE: dict[str, Any] = {
                     ),
                     practice="Style a form input and button so hover, focus, and at least one validation state are clearly visible.",
                     visual="## Visual aid\n`Interaction state` -> `Visual feedback` -> `User guidance`",
+                    game_key="ui-mood-runway",
                 ),
                 _lesson(
                     title="Validate and communicate user input with JavaScript",
@@ -1577,6 +1639,7 @@ FOUNDATIONS_CURRICULUM_TEMPLATE: dict[str, Any] = {
                     ),
                     practice="Take a small dataset and use an array method to filter or reshape it before showing it in the DOM.",
                     visual="## Visual aid\n`Raw data` -> `Transform` -> `Cleaner render`",
+                    game_key="data-remix-club",
                 ),
                 _lesson(
                     title="Build reusable render functions for repeated UI blocks",
@@ -1638,6 +1701,7 @@ FOUNDATIONS_CURRICULUM_TEMPLATE: dict[str, Any] = {
                     ),
                     practice="Fetch a small dataset and show one loading message, one success state, and one error fallback.",
                     visual="## Visual aid\n`Request starts` -> `Loading UI` -> `Success or error`",
+                    game_key="signal-rescue-mission",
                     playground=_js_playground(
                         "Write an async function that fetches data and logs the first item.",
                         "async function loadData() {\n  const response = await fetch('https://jsonplaceholder.typicode.com/posts');\n  const data = await response.json();\n  console.log(data[0].title);\n}\n\nloadData();\n",

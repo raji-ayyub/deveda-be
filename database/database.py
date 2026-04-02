@@ -26,6 +26,7 @@ course_curricula_collection = db.course_curricula
 lesson_library_collection = db.lesson_library
 content_intake_sessions_collection = db.content_intake_sessions
 achievements_collection = db.achievements
+lesson_game_progress_collection = db.lesson_game_progress
 agent_assignments_collection = db.agent_assignments
 agent_threads_collection = db.agent_threads
 agent_messages_collection = db.agent_messages
@@ -145,6 +146,14 @@ async def ensure_indexes() -> None:
         name="achievements_user_course_kind_key_unique",
     )
     await achievements_collection.create_index([("awarded_at", DESCENDING)], name="achievements_awarded_at")
+
+    await lesson_game_progress_collection.create_index(
+        [("user_id", ASCENDING), ("course_slug", ASCENDING), ("lesson_slug", ASCENDING)],
+        unique=True,
+        name="lesson_game_progress_user_course_lesson_unique",
+    )
+    await lesson_game_progress_collection.create_index([("course_slug", ASCENDING)], name="lesson_game_progress_course_slug")
+    await lesson_game_progress_collection.create_index([("updated_at", DESCENDING)], name="lesson_game_progress_updated_at")
 
     await agent_assignments_collection.create_index([("user_id", ASCENDING)], name="agent_assignments_user_id")
     await agent_assignments_collection.create_index([("status", ASCENDING)], name="agent_assignments_status")

@@ -9,6 +9,13 @@ PUBLIC_REGISTRATION_ROLES = {"Student", "Instructor"}
 QUESTION_DIFFICULTIES = {"Easy", "Medium", "Hard"}
 QUESTION_TYPES = {"single", "multiple", "multiple_choice"}
 LESSON_CONTENT_TYPES = {"lesson", "quiz", "test", "project", "resource"}
+LESSON_GAME_KEYS = {
+    "semantic-sleuth",
+    "grid-studio",
+    "ui-mood-runway",
+    "data-remix-club",
+    "signal-rescue-mission",
+}
 PLAYGROUND_MODES = {"web", "javascript"}
 PLAYGROUND_CHECK_TYPES = {"includes", "output"}
 PLAYGROUND_TARGETS = {"html", "css", "js", "console"}
@@ -287,6 +294,36 @@ class CourseProgressUpdate(BaseModel):
         return cleaned or None
 
 
+class LessonGameProgressUpdate(BaseModel):
+    gameKey: str
+    totalRounds: int = Field(default=1, ge=1)
+    score: int = Field(default=0, ge=0)
+    completedRounds: int = Field(default=0, ge=0)
+    accuracy: int = Field(default=0, ge=0, le=100)
+    completed: bool = Field(default=False)
+
+    @validator("gameKey", pre=True)
+    def validate_game_key(cls, value: str) -> str:
+        value = _clean_text(value)
+        if value not in LESSON_GAME_KEYS:
+            raise ValueError("Lesson game key is not recognized")
+        return value
+
+    @validator("completedRounds")
+    def validate_completed_rounds(cls, value: int, values) -> int:
+        total_rounds = int(values.get("totalRounds") or 0)
+        if total_rounds and value > total_rounds:
+            raise ValueError("Completed rounds cannot exceed total rounds")
+        return value
+
+    @validator("score")
+    def validate_score(cls, value: int, values) -> int:
+        total_rounds = int(values.get("totalRounds") or 0)
+        if total_rounds and value > total_rounds:
+            raise ValueError("Score cannot exceed total rounds")
+        return value
+
+
 class LessonPlaygroundCheckInput(BaseModel):
     label: str
     type: str = Field(default="includes")
@@ -353,6 +390,7 @@ class LessonInput(BaseModel):
     visualAidMarkdown: Optional[str] = ""
     practicePrompt: Optional[str] = ""
     instructorNotes: Optional[str] = ""
+    gameKey: Optional[str] = None
     playground: Optional[LessonPlaygroundInput] = None
 
     @validator("title", "slug", "summary", pre=True)
@@ -379,12 +417,21 @@ class LessonInput(BaseModel):
         "visualAidMarkdown",
         "practicePrompt",
         "instructorNotes",
+        "gameKey",
         pre=True,
     )
     def clean_optional_lesson_text(cls, value: Optional[str]) -> Optional[str]:
         if value is None:
             return value
         return _clean_text(value)
+
+    @validator("gameKey")
+    def validate_game_key(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        if value not in LESSON_GAME_KEYS:
+            raise ValueError("Lesson game key is not recognized")
+        return value
 
     @validator("generationStatus")
     def validate_generation_status(cls, value: Optional[str]) -> Optional[str]:

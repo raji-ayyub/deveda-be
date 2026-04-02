@@ -14,6 +14,7 @@ from schemas.schemas import (
     CourseCatalogCreate,
     CourseCurriculumUpsert,
     CourseEnroll,
+    LessonGameProgressUpdate,
     CourseProgressUpdate,
     ContentGenerationActionRequest,
     MediaUploadSignatureRequest,
@@ -27,7 +28,7 @@ from schemas.schemas import (
     UserStatusUpdate,
     UserUpdate,
 )
-from services import achievement_services, admin_services, agent_services, auth_services, content_intake_services, content_services, course_seed_services, course_services, lesson_library_services, media_services, quiz_services
+from services import achievement_services, admin_services, agent_services, auth_services, content_intake_services, content_services, course_seed_services, course_services, lesson_game_services, lesson_library_services, media_services, quiz_services
 
 openapi_tags = [
     {
@@ -398,6 +399,39 @@ async def update_course_progress(
 ):
     auth_services.ensure_self_or_roles(current_user, user_id, {"Admin", "Instructor"})
     return await course_services.CourseService.update_course_progress(user_id, course_slug, payload)
+
+
+@app.get(
+    "/users/{user_id}/courses/{course_slug}/lessons/{lesson_slug}/game-progress",
+    tags=["Course Enrollment"],
+    summary="Get lesson game progress",
+    description="Returns the saved game progress for one learner, course, and lesson combination.",
+)
+async def get_lesson_game_progress(
+    user_id: str,
+    course_slug: str,
+    lesson_slug: str,
+    current_user: dict = Depends(auth_services.get_current_user),
+):
+    auth_services.ensure_self_or_roles(current_user, user_id, {"Admin", "Instructor"})
+    return await lesson_game_services.LessonGameService.get_progress(user_id, course_slug, lesson_slug)
+
+
+@app.put(
+    "/users/{user_id}/courses/{course_slug}/lessons/{lesson_slug}/game-progress",
+    tags=["Course Enrollment"],
+    summary="Update lesson game progress",
+    description="Stores role-aware learner progress for a lesson game and returns any newly unlocked awards.",
+)
+async def update_lesson_game_progress(
+    user_id: str,
+    course_slug: str,
+    lesson_slug: str,
+    payload: LessonGameProgressUpdate,
+    current_user: dict = Depends(auth_services.get_current_user),
+):
+    auth_services.ensure_self_or_roles(current_user, user_id, {"Admin", "Instructor"})
+    return await lesson_game_services.LessonGameService.update_progress(user_id, course_slug, lesson_slug, payload)
 
 
 @app.post(

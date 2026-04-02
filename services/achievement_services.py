@@ -141,6 +141,44 @@ class AchievementService:
         return awarded
 
     @staticmethod
+    async def sync_lesson_game_achievement(
+        user_id: ObjectId,
+        course: dict,
+        lesson: dict,
+        best_score: int,
+        total_rounds: int,
+        best_accuracy: int,
+    ):
+        if total_rounds <= 0 or best_score < total_rounds or best_accuracy < 100:
+            return []
+
+        lesson_slug = str(lesson.get("slug") or "").strip()
+        lesson_title = str(lesson.get("title") or "Lesson").strip() or "Lesson"
+        awarded_at = datetime.utcnow()
+        record = {
+            "user_id": user_id,
+            "course_slug": course["slug"],
+            "course_title": course["title"],
+            "kind": "lesson_game_mastery",
+            "key": f"{course['slug']}:lesson-game:{lesson_slug}",
+            "title": f"{lesson_title} game mastered",
+            "description": f"The learner achieved a perfect run in the {lesson_title.lower()} lesson game.",
+            "celebration_message": "Perfect run. You mastered this lesson challenge and locked in the skill.",
+            "badge_label": "Game mastery",
+            "badge_tone": "violet",
+            "progress_trigger": 100,
+            "skills": [lesson_title, "Interactive practice", "Lesson reinforcement"],
+            "deliverables": ["Perfect lesson game score", "Demonstrated lesson understanding"],
+            "parent_summary": (
+                f"The learner mastered the interactive challenge for {lesson_title} in {course['title']}, "
+                "showing confident understanding through practice."
+            ),
+            "awarded_at": awarded_at,
+        }
+        created = await _award_if_missing(record)
+        return [serialize_achievement(created)] if created else []
+
+    @staticmethod
     async def get_user_achievements(user_id: str, course_slug: Optional[str] = None):
         oid = validate_object_id(user_id)
         user = await users_collection.find_one({"_id": oid})
