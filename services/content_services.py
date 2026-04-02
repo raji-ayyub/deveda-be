@@ -207,7 +207,7 @@ def normalize_lesson(course: dict, module_title: str, lesson: dict) -> dict:
         "visualAidMarkdown": lesson.get("visualAidMarkdown") if lesson.get("visualAidMarkdown") is not None else ("" if is_planned else _default_visual_aid_markdown(lesson)),
         "practicePrompt": lesson.get("practicePrompt") if lesson.get("practicePrompt") is not None else ("" if is_planned else _default_practice_prompt(course, lesson)),
         "instructorNotes": lesson.get("instructorNotes") or "",
-        "playground": lesson.get("playground") if lesson.get("playground") is not None or is_planned else _default_playground(course, lesson),
+        "playground": lesson["playground"] if "playground" in lesson or is_planned else _default_playground(course, lesson),
     }
     return normalized
 

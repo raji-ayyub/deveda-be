@@ -10,6 +10,8 @@ from services.lesson_library_services import LessonLibraryService
 SEED_AUTHOR = "Deveda Milestone Studio"
 COURSE_SLUG = "frontend-milestone-blank-file-to-live-url"
 COURSE_TITLE = "Frontend Milestone: Blank File to Live URL"
+MILESTONE_SEED_VERSION = 2
+_PLAYGROUND_UNSET = object()
 
 
 def _lesson(
@@ -26,7 +28,7 @@ def _lesson(
     visual: str = "",
     content_type: str = "lesson",
     game_key: str | None = None,
-    playground: dict[str, Any] | None = None,
+    playground: dict[str, Any] | None | object = _PLAYGROUND_UNSET,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "title": title,
@@ -49,7 +51,7 @@ def _lesson(
     }
     if game_key is not None:
         payload["gameKey"] = game_key
-    if playground is not None:
+    if playground is not _PLAYGROUND_UNSET:
         payload["playground"] = playground
     return payload
 
@@ -102,18 +104,19 @@ def _js_playground(instructions: str, js: str, checks: list[dict[str, str]]) -> 
 
 COURSE_CURRICULUM_TEMPLATE: dict[str, Any] = {
     "overview": (
-        "This milestone validates the move from blank files to a polished live frontend project. "
-        "It blends HTML structure, CSS layout, JavaScript logic, API work, GitHub workflow, and Vercel deployment."
+        "This milestone proves the learner can move from an empty project folder to a shareable frontend build with structure, layout, "
+        "JavaScript logic, live data, version control, deployment, and a confident final walkthrough."
     ),
     "learning_flow": [
-        "Build clear structure first, then responsive layout.",
-        "Move from static markup into JavaScript logic and DOM rendering.",
-        "Finish with live data, deployment, and a presentable milestone showcase.",
+        "Plan the page structure and file setup before styling so the project stays readable.",
+        "Use Flexbox and clean file linking to turn the scaffold into a responsive interface.",
+        "Move from static content into reusable JavaScript, data modeling, and DOM rendering.",
+        "Finish with live data, GitHub workflow, deployment, and a strong showcase story.",
     ],
     "visual_aid_markdown": (
         "## Roadmap\n"
-        "`Semantic scaffold` -> `Responsive layout` -> `JavaScript logic` -> `Live data` -> `GitHub` -> `Vercel`\n\n"
-        "The milestone is complete when the learner can share both the live URL and the repository."
+        "`Project scaffold` -> `Responsive sections` -> `Reusable logic` -> `DOM rendering` -> `API integration` -> `GitHub + Vercel`\n\n"
+        "The milestone is complete when the learner can open the repository, explain the code, and share a working live URL."
     ),
     "modules": [
         {
@@ -128,60 +131,165 @@ COURSE_CURRICULUM_TEMPLATE: dict[str, Any] = {
                 _lesson(
                     title="Plan a semantic project scaffold",
                     slug=f"{COURSE_SLUG}-semantic-project-scaffold",
-                    summary="Set up a page with meaningful sections before styling it.",
+                    summary="Design the HTML skeleton of a real milestone page so every section has a clear job before styling begins.",
                     duration=20,
-                    objectives=["Choose semantic page sections.", "Create clean styling hooks.", "Explain the page structure clearly."],
-                    takeaways=["Strong markup makes styling easier.", "Semantic structure reduces messy rewrites."],
-                    flow=["Outline the page areas.", "Write the HTML scaffold.", "Review before styling."],
-                    markdown="# Plan a semantic scaffold\n\nUse meaningful HTML before worrying about visuals. Clear structure makes styling and scripting calmer later.",
-                    visual="## Visual aid\n`Meaning` -> `Structure` -> `Style hooks`",
-                    practice="Turn one student-project idea into a semantic page shell before adding CSS.",
+                    objectives=[
+                        "Translate a project idea into semantic page regions.",
+                        "Choose class hooks that help styling without replacing meaning.",
+                        "Review a scaffold and explain why each section exists.",
+                    ],
+                    takeaways=[
+                        "A milestone page should read like a story even before CSS is added.",
+                        "Semantic structure makes layout, accessibility, and scripting easier later.",
+                    ],
+                    flow=[
+                        "List the page sections the project needs.",
+                        "Choose semantic tags for each section.",
+                        "Add only the classes and ids needed for styling or scripting.",
+                        "Review the scaffold before moving into layout work.",
+                    ],
+                    markdown=(
+                        "# Plan a semantic project scaffold\n\n"
+                        "The milestone should not begin with random divs and styling experiments. It should begin with a page structure that already makes sense on its own.\n\n"
+                        "## Start with the page story\n"
+                        "Ask what the page needs to communicate first. A typical milestone page might need a hero area, a feature or project section, a proof section, and a clear footer. "
+                        "Those decisions tell you what belongs inside `header`, `main`, `section`, `article`, and `footer`.\n\n"
+                        "## Semantic tags are not decoration\n"
+                        "Semantic HTML helps you explain the page, style it more calmly, and attach behavior in the right places. "
+                        "When someone scans the markup, they should understand the purpose of the content before they even see the CSS.\n\n"
+                        "## Use classes as hooks, not as structure\n"
+                        "Classes such as `hero`, `project-grid`, or `cta-button` are useful because they describe styling or component roles. "
+                        "They should support the semantic structure, not replace it.\n\n"
+                        "## Milestone quality check\n"
+                        "Before you move on, read the HTML outline from top to bottom. If the page sounds organized without styles, the scaffold is doing its job."
+                    ),
+                    visual=(
+                        "## Visual aid\n"
+                        "`Project goal` -> `Semantic sections` -> `Meaningful class hooks` -> `Cleaner styling later`\n\n"
+                        "Think of the scaffold as the blueprint for the entire milestone."
+                    ),
+                    practice="Sketch a landing page for your milestone and turn it into a scaffold with `header`, `main`, at least two purposeful `section` blocks, and a `footer`.",
                     playground=_web_playground(
-                        "Create a semantic page shell with a header, main area, and footer.",
-                        "<header><h1>Milestone Project</h1></header>\n<main><section class=\"hero\"></section></main>\n<footer></footer>",
-                        "body { margin: 0; font-family: 'Segoe UI', sans-serif; }",
+                        "Build the semantic shell for a milestone landing page with navigation, a hero section, one proof section, and a footer.",
+                        "<header class=\"site-header\">\n  <nav class=\"site-nav\">\n    <a href=\"#home\" class=\"brand\">LaunchLab</a>\n  </nav>\n</header>\n<main>\n  <section class=\"hero\">\n    <h1>Build from blank file to live URL</h1>\n    <p>Shape this milestone page with clear semantic structure.</p>\n  </section>\n  <section class=\"project-proof\">\n    <article>\n      <h2>Project proof</h2>\n      <p>Add evidence that the build is real.</p>\n    </article>\n  </section>\n</main>\n<footer>\n  <p>Ready for launch.</p>\n</footer>",
+                        "body { margin: 0; font-family: 'Segoe UI', sans-serif; background: #f8fafc; color: #0f172a; }\n.site-header, .hero, .project-proof, footer { padding: 1.25rem; }\n",
                         "",
                         [
                             {"label": "Use a header element", "type": "includes", "target": "html", "value": "<header"},
                             {"label": "Add a main area", "type": "includes", "target": "html", "value": "<main"},
                             {"label": "Keep a hero section hook", "type": "includes", "target": "html", "value": "class=\"hero\""},
+                            {"label": "Include a footer element", "type": "includes", "target": "html", "value": "<footer"},
                         ],
                     ),
                 ),
                 _lesson(
                     title="Build responsive sections with Flexbox",
                     slug=f"{COURSE_SLUG}-responsive-flexbox-sections",
-                    summary="Use Flexbox to arrange related content cleanly across screen sizes.",
+                    summary="Use Flexbox to turn the milestone scaffold into sections that align, space, and wrap cleanly on smaller screens.",
                     duration=30,
-                    objectives=["Use a flex parent intentionally.", "Control spacing with gap and wrap.", "Adjust alignment without brittle hacks."],
-                    takeaways=["Flexbox is ideal for one-dimensional layout.", "Parent layout rules create cleaner sections."],
-                    flow=["Identify the parent container.", "Apply flex rules.", "Test the layout at smaller widths."],
-                    markdown="# Build responsive sections with Flexbox\n\nStart with the container, not the children. Gap, alignment, and wrapping should be intentional.",
-                    visual="## Visual aid\n`Parent container` -> `Flex alignment` -> `Responsive section`",
-                    practice="Convert a plain list of project cards into a responsive card row that wraps cleanly.",
+                    objectives=[
+                        "Identify the correct parent container for a Flexbox layout.",
+                        "Use gap, wrap, and alignment to control section behavior.",
+                        "Check whether the section still works at narrow widths.",
+                    ],
+                    takeaways=[
+                        "Flexbox works best when the main layout problem is one-dimensional.",
+                        "Responsive sections begin with good parent rules, not child-level hacks.",
+                    ],
+                    flow=[
+                        "Choose the container that should control the row or column.",
+                        "Apply display, gap, alignment, and wrap intentionally.",
+                        "Test what happens when the viewport shrinks.",
+                        "Refine the section so the content still feels balanced.",
+                    ],
+                    markdown=(
+                        "# Build responsive sections with Flexbox\n\n"
+                        "Once the scaffold is ready, the next job is arranging content in a way that still feels intentional when the screen gets smaller.\n\n"
+                        "## Think in parent-child relationships\n"
+                        "Flexbox should usually live on the container. The container decides whether items sit in a row or column, how they align, and whether they wrap when space runs out.\n\n"
+                        "## Use gap before spacing hacks\n"
+                        "If cards or feature blocks need breathing room, `gap` communicates that relationship clearly. "
+                        "It is easier to maintain than giving every child a different margin.\n\n"
+                        "## Wrapping protects the layout\n"
+                        "A responsive milestone page should not force tiny unreadable cards across a narrow screen. "
+                        "Allowing the section to wrap keeps content readable and helps the layout adapt gracefully.\n\n"
+                        "## Test the section, not just the row\n"
+                        "The goal is not only to make one screenshot look good. The goal is to make the section feel stable across devices."
+                    ),
+                    visual=(
+                        "## Visual aid\n"
+                        "`Container decides layout` -> `Children inherit the flow` -> `Wrap when needed` -> `Readable section on mobile`\n\n"
+                        "Flexbox is strongest when the parent owns the layout rules."
+                    ),
+                    practice="Take a row of project or feature cards and make it wrap cleanly with even spacing and balanced alignment.",
                     playground=_web_playground(
-                        "Build a wrapping card layout with Flexbox.",
-                        "<section class=\"card-grid\">\n  <article class=\"card\">HTML</article>\n  <article class=\"card\">CSS</article>\n  <article class=\"card\">JavaScript</article>\n</section>",
-                        ".card-grid {\n  display: flex;\n}\n\n.card {\n  padding: 1rem;\n  border-radius: 1rem;\n  background: white;\n}\n",
+                        "Turn the feature cards into a responsive Flexbox section that spaces evenly and wraps on smaller screens.",
+                        "<section class=\"feature-strip\">\n  <article class=\"card\">\n    <h2>Semantic HTML</h2>\n    <p>Readable page structure.</p>\n  </article>\n  <article class=\"card\">\n    <h2>Responsive CSS</h2>\n    <p>Layouts that hold together.</p>\n  </article>\n  <article class=\"card\">\n    <h2>Live JavaScript</h2>\n    <p>Data that reaches the screen.</p>\n  </article>\n</section>",
+                        "body {\n  margin: 0;\n  padding: 1.5rem;\n  font-family: 'Segoe UI', sans-serif;\n  background: linear-gradient(180deg, #eff6ff 0%, #e2e8f0 100%);\n}\n\n.feature-strip {\n  display: flex;\n  gap: 1rem;\n  flex-wrap: wrap;\n}\n\n.card {\n  flex: 1 1 220px;\n  padding: 1rem;\n  border-radius: 1rem;\n  background: white;\n  box-shadow: 0 14px 40px rgba(15, 23, 42, 0.08);\n}\n",
                         "",
                         [
                             {"label": "Use display flex", "type": "includes", "target": "css", "value": "display: flex"},
                             {"label": "Add gap spacing", "type": "includes", "target": "css", "value": "gap"},
                             {"label": "Allow wrapping", "type": "includes", "target": "css", "value": "wrap"},
+                            {"label": "Give cards a flexible basis", "type": "includes", "target": "css", "value": "flex:"},
                         ],
                     ),
                 ),
                 _lesson(
                     title="Link styles and scripts cleanly",
                     slug=f"{COURSE_SLUG}-link-styles-and-scripts",
-                    summary="Keep HTML, CSS, and JavaScript in separate files and wire them correctly.",
+                    summary="Organize the milestone into clean files and connect HTML, CSS, and JavaScript in a way that matches real project workflow.",
                     duration=20,
-                    objectives=["Link CSS in the right place.", "Load JavaScript intentionally.", "Verify each file is connected."],
-                    takeaways=["Project structure is part of professional workflow.", "Broken links are easy to catch with simple checks."],
-                    flow=["Create the file structure.", "Link the stylesheet.", "Connect the script and verify all three files."],
-                    markdown="# Link styles and scripts cleanly\n\nA tidy project is easier to debug, review, and deploy. File organization is part of the milestone.",
-                    visual="## Visual aid\n`HTML` -> `External CSS` -> `External JavaScript`",
-                    practice="Create `index.html`, `styles.css`, and `app.js`, then prove all three are connected by editing each one once.",
+                    objectives=[
+                        "Place the stylesheet link in the correct part of the document.",
+                        "Load the script in a way that does not fight page parsing.",
+                        "Verify that HTML, CSS, and JavaScript are all wired together correctly.",
+                    ],
+                    takeaways=[
+                        "A milestone project should look organized on disk, not only in the browser.",
+                        "Correct file linking is one of the quickest ways to prevent confusing frontend bugs.",
+                    ],
+                    flow=[
+                        "Decide on a simple project structure.",
+                        "Link the stylesheet from the HTML document head.",
+                        "Connect JavaScript intentionally, usually with `defer`.",
+                        "Change each file once to confirm the project is wired correctly.",
+                    ],
+                    markdown=(
+                        "# Link styles and scripts cleanly\n\n"
+                        "A real milestone project should not keep all of its logic inside one giant HTML file. "
+                        "Separating markup, CSS, and JavaScript makes the project easier to debug, review, and deploy.\n\n"
+                        "## The usual file structure\n"
+                        "A beginner-friendly milestone setup often starts with `index.html`, `styles.css`, and `app.js`. "
+                        "That is enough to prove clean separation of concerns without making the project feel heavy.\n\n"
+                        "## Where each connection belongs\n"
+                        "The stylesheet usually belongs in the document head so the browser can load visual rules while the page is parsed. "
+                        "The script is often linked with `defer` so the HTML can load first without the script blocking the page.\n\n"
+                        "## Verify with tiny changes\n"
+                        "One of the fastest checks is to change the text in the HTML, a visible color in CSS, and a small interaction in JavaScript. "
+                        "If all three show up, the wiring is working.\n\n"
+                        "## Why this matters for the milestone\n"
+                        "Good file linking proves the learner can move beyond sandbox snippets and work in a project structure that can actually be pushed and deployed."
+                    ),
+                    visual=(
+                        "## Visual aid\n"
+                        "`index.html` -> `<link rel=\"stylesheet\">` -> `styles.css`\n"
+                        "`index.html` -> `<script defer>` -> `app.js`\n\n"
+                        "Each file has one main responsibility, but the HTML document connects them."
+                    ),
+                    practice="Create a three-file milestone starter, link the stylesheet and script correctly, then prove the connection with one visual change and one JavaScript action.",
+                    playground=_web_playground(
+                        "Treat the HTML, CSS, and JavaScript panes as `index.html`, `styles.css`, and `app.js`. Write the correct link and script tags in the HTML file even though the preview already loads the CSS and JS panes for convenience.",
+                        "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n  <meta charset=\"UTF-8\" />\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />\n  <title>Milestone Starter</title>\n</head>\n<body>\n  <main class=\"shell\">\n    <h1 id=\"status\">Files not linked yet</h1>\n    <button id=\"check-link\">Check project wiring</button>\n  </main>\n</body>\n</html>",
+                        "body {\n  margin: 0;\n  font-family: 'Segoe UI', sans-serif;\n  background: #020617;\n  color: white;\n}\n\n.shell {\n  max-width: 520px;\n  margin: 3rem auto;\n  padding: 2rem;\n  border-radius: 1.5rem;\n  background: rgba(15, 23, 42, 0.92);\n}\n",
+                        "const button = document.getElementById('check-link');\nconst status = document.getElementById('status');\n\nbutton?.addEventListener('click', () => {\n  if (status) {\n    status.textContent = 'Project files are connected.';\n  }\n});\n",
+                        [
+                            {"label": "Link the stylesheet", "type": "includes", "target": "html", "value": "<link"},
+                            {"label": "Reference the styles file", "type": "includes", "target": "html", "value": "styles.css"},
+                            {"label": "Add the script tag", "type": "includes", "target": "html", "value": "<script"},
+                            {"label": "Load JavaScript with defer", "type": "includes", "target": "html", "value": "defer"},
+                        ],
+                    ),
                 ),
             ],
         },
@@ -197,20 +305,51 @@ COURSE_CURRICULUM_TEMPLATE: dict[str, Any] = {
                 _lesson(
                     title="Write reusable functions with parameters",
                     slug=f"{COURSE_SLUG}-functions-with-parameters",
-                    summary="Package repeated logic into functions that can handle different inputs.",
+                    summary="Turn repeated milestone behavior into named functions that can respond to different inputs without copy-paste code.",
                     duration=25,
-                    objectives=["Name a function clearly.", "Use parameters to change behavior.", "Test one function with multiple values."],
-                    takeaways=["Functions reduce repetition.", "Parameters make code reusable."],
-                    flow=["Spot repeated logic.", "Move it into a function.", "Pass changing values as parameters."],
-                    markdown="# Write reusable functions\n\nReusable code is one of the first signs that the learner is moving beyond copy-paste scripting.",
-                    visual="## Visual aid\n`Repeated task` -> `Named function` -> `Different inputs`",
-                    practice="Create a function that formats a project summary and call it with at least three different values.",
+                    objectives=[
+                        "Spot repeated behavior that should become a function.",
+                        "Use parameters so one function can handle multiple cases.",
+                        "Test the same function with different milestone data.",
+                    ],
+                    takeaways=[
+                        "Reusable functions reduce repetition and make intent clearer.",
+                        "Parameters let one block of logic adapt instead of being rewritten.",
+                    ],
+                    flow=[
+                        "Find repeated logic in the project.",
+                        "Give the logic a clear function name.",
+                        "Replace the changing parts with parameters.",
+                        "Call the function with more than one value to prove it is reusable.",
+                    ],
+                    markdown=(
+                        "# Write reusable functions with parameters\n\n"
+                        "As soon as a project starts repeating the same pattern with slightly different text or values, it is time to consider a function.\n\n"
+                        "## A function names the job\n"
+                        "Instead of leaving logic scattered across the file, wrap one clear responsibility inside a named function. "
+                        "That turns a vague action into a reusable tool.\n\n"
+                        "## Parameters carry the changing pieces\n"
+                        "The name of the learner, the title of a project card, or the status badge text should not require a whole new block of code each time. "
+                        "Parameters let one function handle those differences.\n\n"
+                        "## Why this matters in a milestone build\n"
+                        "Reusable functions are often the point where code starts feeling designed instead of copied. "
+                        "They make DOM rendering and later refactors much easier.\n\n"
+                        "## Test with variation\n"
+                        "A function only proves its value when you call it with multiple inputs and still get clean, predictable output."
+                    ),
+                    visual=(
+                        "## Visual aid\n"
+                        "`Repeated task` -> `Named function` -> `Parameters` -> `Different outputs from one tool`\n\n"
+                        "One job, many inputs."
+                    ),
+                    practice="Write one function for a milestone card or status line, then call it with at least three different project values.",
                     playground=_js_playground(
-                        "Write a function that receives a learner name and project title, then logs a formatted summary.",
-                        "function formatProject(name, title) {\n  return `${name} built ${title}`;\n}\n\nconsole.log(formatProject('Zara', 'Portfolio Card'));\n",
+                        "Write a reusable function that receives a learner name, project title, and deployment status, then returns a milestone summary.",
+                        "function formatProjectSummary(name, title, status) {\n  return `${name} built ${title} and the current status is ${status}.`;\n}\n\nconsole.log(formatProjectSummary('Zara', 'Portfolio Card', 'Ready for review'));\n",
                         [
                             {"label": "Use a function", "type": "includes", "target": "js", "value": "function"},
-                            {"label": "Accept parameters", "type": "includes", "target": "js", "value": "("},
+                            {"label": "Return a result", "type": "includes", "target": "js", "value": "return"},
+                            {"label": "Use multiple parameters", "type": "includes", "target": "js", "value": ","},
                             {"label": "Log a result", "type": "includes", "target": "js", "value": "console.log"},
                         ],
                     ),
@@ -218,35 +357,106 @@ COURSE_CURRICULUM_TEMPLATE: dict[str, Any] = {
                 _lesson(
                     title="Model data with arrays and objects",
                     slug=f"{COURSE_SLUG}-arrays-and-objects",
-                    summary="Organize information so the interface has clean data to work with.",
+                    summary="Shape milestone content into arrays and objects so rendering code has a clean source of truth.",
                     duration=25,
-                    objectives=["Choose between arrays and objects.", "Store repeated records clearly.", "Read properties from a data structure."],
-                    takeaways=["Arrays hold many similar items.", "Objects hold named properties for one item."],
-                    flow=["List the needed data.", "Shape one object.", "Collect several objects in an array."],
-                    markdown="# Model data with arrays and objects\n\nGood rendering becomes easier when the data shape matches the story the page needs to tell.",
-                    visual="## Visual aid\n`One record` -> `Object`\n`Many records` -> `Array`",
-                    practice="Create an array of three project objects and decide which fields the DOM will display.",
+                    objectives=[
+                        "Choose when one record should be an object and many records should be an array.",
+                        "Store repeated project data with consistent property names.",
+                        "Read values from the data structure before rendering it.",
+                    ],
+                    takeaways=[
+                        "Good UI output depends on good data shape.",
+                        "Arrays and objects make later rendering logic far more predictable.",
+                    ],
+                    flow=[
+                        "List the values the interface needs.",
+                        "Create one project record as an object.",
+                        "Collect multiple records inside an array.",
+                        "Inspect the data before moving into rendering.",
+                    ],
+                    markdown=(
+                        "# Model data with arrays and objects\n\n"
+                        "Interfaces become much easier to build when the data already matches the structure of the page.\n\n"
+                        "## Objects describe one item\n"
+                        "A project card might need a title, status, stack, and live URL. "
+                        "Those named properties belong naturally inside one object.\n\n"
+                        "## Arrays hold many related items\n"
+                        "If the milestone needs to show several project cards, testimonials, or skill badges, an array can hold each object in one place. "
+                        "That gives rendering code a predictable collection to loop through.\n\n"
+                        "## Consistency matters\n"
+                        "If one object uses `title` and another uses `projectName` for the same idea, the rendering layer gets messy. "
+                        "Use the same property names when the data represents the same kind of item.\n\n"
+                        "## This is the setup for DOM rendering\n"
+                        "Once the data is shaped well, the next step is simply turning that structure into visible markup."
+                    ),
+                    visual=(
+                        "## Visual aid\n"
+                        "`One project` -> `Object`\n"
+                        "`Many projects` -> `Array of objects`\n"
+                        "`Consistent fields` -> `Easier rendering`\n"
+                    ),
+                    practice="Create an array of three project objects with matching fields and decide which properties should appear on the frontend card.",
+                    playground=_js_playground(
+                        "Model milestone projects as an array of objects and log one field from each record.",
+                        "const projects = [\n  { title: 'Launch Card', status: 'Ready', stack: 'HTML/CSS' },\n  { title: 'API Showcase', status: 'Building', stack: 'JavaScript' },\n  { title: 'Portfolio Refresh', status: 'Live', stack: 'HTML/CSS/JS' },\n];\n\nprojects.forEach((project) => {\n  console.log(project.title, '-', project.status);\n});\n",
+                        [
+                            {"label": "Create an array", "type": "includes", "target": "js", "value": "["},
+                            {"label": "Use object records", "type": "includes", "target": "js", "value": "title:"},
+                            {"label": "Read project data", "type": "includes", "target": "js", "value": "project."},
+                            {"label": "Log the result", "type": "includes", "target": "js", "value": "console.log"},
+                        ],
+                    ),
                 ),
                 _lesson(
                     title="Render data into the DOM",
                     slug=f"{COURSE_SLUG}-dom-rendering",
-                    summary="Turn stored data into visible content on the page.",
+                    summary="Take the milestone data model and transform it into visible cards, labels, and summaries on the page.",
                     duration=35,
-                    objectives=["Pick a DOM render target.", "Loop through stored data.", "Render repeated UI content clearly."],
-                    takeaways=["DOM rendering connects logic to what the user sees.", "Clean data shapes make rendering easier."],
-                    flow=["Choose the container.", "Read the data.", "Build the output.", "Inject it into the page."],
-                    markdown="# Render data into the DOM\n\nRendering is the bridge between stored JavaScript data and visible interface output.",
-                    visual="## Visual aid\n`Array of records` -> `Render function` -> `Visible cards`",
-                    practice="Render a list of project summaries into card elements and confirm the DOM updates when the data changes.",
+                    objectives=[
+                        "Choose the right container for rendered content.",
+                        "Loop through stored data to create repeated UI output.",
+                        "Update the page so the user can see the data clearly.",
+                    ],
+                    takeaways=[
+                        "DOM rendering is where data becomes interface.",
+                        "Clear containers and clean markup patterns make rendering easier to maintain.",
+                    ],
+                    flow=[
+                        "Select the DOM container.",
+                        "Read the array or object data.",
+                        "Generate markup for each record.",
+                        "Inject the output and review what the user actually sees.",
+                    ],
+                    markdown=(
+                        "# Render data into the DOM\n\n"
+                        "Data only becomes useful to the learner or end user when it appears on screen in a clear format.\n\n"
+                        "## Start with one render target\n"
+                        "Pick the element that should receive the content, such as a project grid or testimonial list. "
+                        "That container becomes the home for your rendered output.\n\n"
+                        "## Turn records into repeated markup\n"
+                        "Once the data is shaped consistently, you can loop through it and build one repeated UI pattern. "
+                        "The important part is that the markup stays easy to read and the data-to-UI relationship stays obvious.\n\n"
+                        "## Rendering is where structure and logic meet\n"
+                        "Semantic HTML still matters here. A rendered project card can still be an `article`, a title can still be a heading, and support text can still be a paragraph.\n\n"
+                        "## Review the visible result\n"
+                        "Always inspect the actual page after rendering. If the code works but the output feels cluttered or unclear, the UI still needs refinement."
+                    ),
+                    visual=(
+                        "## Visual aid\n"
+                        "`Array of project records` -> `map or loop` -> `Rendered HTML` -> `Visible project grid`\n\n"
+                        "The DOM is the final stage where data becomes experience."
+                    ),
+                    practice="Render a list of milestone projects into card elements, then change one data object and confirm the page updates accordingly.",
                     playground=_web_playground(
-                        "Render a small project list into the page with JavaScript.",
-                        "<section>\n  <h1>Projects</h1>\n  <div id=\"project-list\"></div>\n</section>",
-                        "#project-list {\n  display: grid;\n  gap: 12px;\n}\n\n.project-card {\n  padding: 12px;\n  border-radius: 12px;\n  background: #eff6ff;\n}\n",
-                        "const projects = [\n  { title: 'Landing Page', status: 'Live' },\n  { title: 'Quiz App', status: 'In progress' },\n];\n\nconst list = document.getElementById('project-list');\nlist.innerHTML = projects.map((project) => `<article class=\"project-card\"><h2>${project.title}</h2><p>${project.status}</p></article>`).join('');\n",
+                        "Render a milestone project list into the DOM with repeated card markup.",
+                        "<section>\n  <h1>Milestone Projects</h1>\n  <div id=\"project-list\"></div>\n</section>",
+                        "body {\n  font-family: 'Segoe UI', sans-serif;\n  padding: 1.5rem;\n  background: #f8fafc;\n}\n\n#project-list {\n  display: grid;\n  gap: 12px;\n}\n\n.project-card {\n  padding: 12px;\n  border-radius: 14px;\n  background: #eff6ff;\n  border: 1px solid #bfdbfe;\n}\n",
+                        "const projects = [\n  { title: 'Landing Page', status: 'Live', stack: 'HTML/CSS' },\n  { title: 'API Showcase', status: 'Building', stack: 'JavaScript' },\n];\n\nconst list = document.getElementById('project-list');\nlist.innerHTML = projects\n  .map((project) => `\n    <article class=\"project-card\">\n      <h2>${project.title}</h2>\n      <p>Status: ${project.status}</p>\n      <p>Stack: ${project.stack}</p>\n    </article>\n  `)\n  .join('');\n",
                         [
                             {"label": "Target the project list", "type": "includes", "target": "js", "value": "project-list"},
                             {"label": "Loop through data", "type": "includes", "target": "js", "value": ".map("},
                             {"label": "Render project-card markup", "type": "includes", "target": "js", "value": "project-card"},
+                            {"label": "Inject HTML into the page", "type": "includes", "target": "js", "value": "innerHTML"},
                         ],
                     ),
                 ),
@@ -264,59 +474,193 @@ COURSE_CURRICULUM_TEMPLATE: dict[str, Any] = {
                 _lesson(
                     title="Fetch live data with async and await",
                     slug=f"{COURSE_SLUG}-async-await-api-fetching",
-                    summary="Call an API, wait for the response, and use the result in the interface.",
+                    summary="Request live JSON data, wait for the response, and push useful fields into the milestone interface.",
                     duration=35,
-                    objectives=["Explain async and await simply.", "Fetch data and parse JSON.", "Connect API data to an interface."],
-                    takeaways=["Async and await make request flow easier to read.", "Fetched data must still be rendered clearly."],
-                    flow=["Choose the endpoint.", "Fetch the data.", "Parse the JSON.", "Render useful fields."],
-                    markdown="# Fetch live data with async and await\n\nThis lesson turns delayed data into a readable, step-by-step workflow.",
-                    visual="## Visual aid\n`Request` -> `await response` -> `await json` -> `render`",
-                    practice="Fetch a small public JSON dataset and render two useful fields into the page.",
-                    playground=_js_playground(
-                        "Write an async function that fetches user data and logs one field.",
-                        "async function loadProjects() {\n  const response = await fetch('https://jsonplaceholder.typicode.com/users');\n  const data = await response.json();\n  console.log(data[0].name);\n}\n\nloadProjects();\n",
+                    objectives=[
+                        "Explain async and await in a step-by-step way.",
+                        "Fetch data from a public endpoint and parse the JSON response.",
+                        "Render useful fields into the interface instead of stopping at the console.",
+                    ],
+                    takeaways=[
+                        "Async and await make network logic easier to follow.",
+                        "A complete frontend feature fetches data and then presents it clearly to the user.",
+                    ],
+                    flow=[
+                        "Choose a public endpoint.",
+                        "Create an async function for the request.",
+                        "Await the response and parse JSON.",
+                        "Render useful fields into the DOM.",
+                    ],
+                    markdown=(
+                        "# Fetch live data with async and await\n\n"
+                        "Real frontend work often depends on data that does not exist directly in the HTML file. "
+                        "Fetching lets the page request information from an external source and then display it when it arrives.\n\n"
+                        "## Why async and await help\n"
+                        "Network requests do not finish instantly. `async` and `await` make that delayed process read more like a sequence of normal steps: request, wait, parse, render.\n\n"
+                        "## Stop treating the console as the finish line\n"
+                        "Logging data is useful for debugging, but the real goal is helping the interface show something meaningful. "
+                        "A milestone project should prove that the learner can move from API response to visible UI.\n\n"
+                        "## Keep the output focused\n"
+                        "Most APIs return more data than the interface needs. Pick the fields that matter, then present them in a clear format such as cards, rows, or a short profile view.\n\n"
+                        "## Think about reliability\n"
+                        "Even a simple fetch feature should make it easy to understand what the page is waiting for and what it received."
+                    ),
+                    visual=(
+                        "## Visual aid\n"
+                        "`Endpoint chosen` -> `async function` -> `await fetch` -> `await response.json()` -> `Render key fields`\n\n"
+                        "The browser request is only the middle of the flow, not the end."
+                    ),
+                    practice="Fetch a small public dataset, choose two useful fields, and display them on the page in a way that matches the milestone design.",
+                    playground=_web_playground(
+                        "Fetch user data and render the first three records into the milestone preview.",
+                        "<section class=\"api-panel\">\n  <h1>Community Spotlights</h1>\n  <p id=\"status\">Waiting to load live data...</p>\n  <div id=\"user-list\" class=\"user-list\"></div>\n</section>",
+                        "body {\n  margin: 0;\n  padding: 1.5rem;\n  font-family: 'Segoe UI', sans-serif;\n  background: #020617;\n  color: #e2e8f0;\n}\n\n.api-panel {\n  max-width: 720px;\n  margin: 0 auto;\n}\n\n.user-list {\n  display: grid;\n  gap: 0.75rem;\n  margin-top: 1rem;\n}\n\n.user-card {\n  padding: 1rem;\n  border-radius: 1rem;\n  background: rgba(15, 23, 42, 0.9);\n  border: 1px solid rgba(125, 211, 252, 0.25);\n}\n",
+                        "const status = document.getElementById('status');\nconst userList = document.getElementById('user-list');\n\nasync function loadProjects() {\n  const response = await fetch('https://jsonplaceholder.typicode.com/users');\n  const data = await response.json();\n\n  if (status) {\n    status.textContent = 'Live data loaded.';\n  }\n\n  if (userList) {\n    userList.innerHTML = data.slice(0, 3).map((user) => `\n      <article class=\"user-card\">\n        <h2>${user.name}</h2>\n        <p>${user.email}</p>\n        <p>${user.company.name}</p>\n      </article>\n    `).join('');\n  }\n}\n\nloadProjects();\n",
                         [
                             {"label": "Use async function syntax", "type": "includes", "target": "js", "value": "async function"},
                             {"label": "Await the fetch call", "type": "includes", "target": "js", "value": "await fetch"},
                             {"label": "Parse JSON", "type": "includes", "target": "js", "value": "response.json"},
+                            {"label": "Render the response into the DOM", "type": "includes", "target": "js", "value": "innerHTML"},
                         ],
                     ),
                 ),
                 _lesson(
                     title="Track progress with Git and GitHub",
                     slug=f"{COURSE_SLUG}-git-and-github-workflow",
-                    summary="Save project changes in meaningful checkpoints and push them to GitHub.",
+                    summary="Capture the milestone build in meaningful commits and publish the working history to GitHub.",
                     duration=20,
-                    objectives=["Explain why commits matter.", "Describe a simple local-to-GitHub flow.", "Recognize a useful beginner commit."],
-                    takeaways=["Version control is part of professional workflow.", "GitHub makes work visible and reviewable."],
-                    flow=["Stage one clear change.", "Write a meaningful commit.", "Push it to the remote repo."],
-                    markdown="# Track progress with Git and GitHub\n\nA milestone is stronger when the learner can show both the finished project and the build history behind it.",
-                    visual="## Visual aid\n`Local change` -> `Commit` -> `GitHub history`",
+                    objectives=[
+                        "Explain why commit history matters in a milestone build.",
+                        "Describe a beginner-friendly local-to-GitHub workflow.",
+                        "Recognize the difference between vague and meaningful commits.",
+                    ],
+                    takeaways=[
+                        "Version control is part of the product story, not extra paperwork.",
+                        "A clear GitHub history shows growth, checkpoints, and working discipline.",
+                    ],
+                    flow=[
+                        "Make one focused change.",
+                        "Stage the files that belong to that change.",
+                        "Write a meaningful commit message.",
+                        "Push the history to GitHub so the project can be reviewed.",
+                    ],
+                    markdown=(
+                        "# Track progress with Git and GitHub\n\n"
+                        "A milestone becomes much stronger when the learner can show not only the final result, but also the path used to build it.\n\n"
+                        "## Commits are checkpoints\n"
+                        "Each commit should represent one clear improvement: scaffold created, responsive layout added, API card rendering completed, or deployment fix applied. "
+                        "That history makes the project easier to understand and easier to recover if something goes wrong.\n\n"
+                        "## GitHub turns local work into visible proof\n"
+                        "Once the repository is pushed, instructors, teammates, or future employers can see that the project is real and actively built. "
+                        "It also becomes the source used for deployment on platforms like Vercel.\n\n"
+                        "## Commit messages should explain intent\n"
+                        "Messages like `update` or `fix stuff` hide the story of the build. "
+                        "Messages like `Add responsive feature strip layout` or `Render API user cards into dashboard` are much more useful.\n\n"
+                        "## Milestone habit\n"
+                        "Do not wait until the end for one giant commit. The milestone should feel like a sequence of thoughtful steps."
+                    ),
+                    visual=(
+                        "## Visual aid\n"
+                        "`Local edit` -> `git add` -> `git commit -m \"meaningful checkpoint\"` -> `git push` -> `Visible GitHub history`\n"
+                    ),
                     practice="Create three milestone-sized commits: scaffold, styling pass, and JavaScript feature.",
+                    playground=None,
                 ),
                 _lesson(
                     title="Deploy and verify on Vercel",
                     slug=f"{COURSE_SLUG}-deploy-and-verify-on-vercel",
-                    summary="Publish the project and confirm the live version behaves as expected.",
+                    summary="Ship the milestone to Vercel and verify that the live project matches what worked locally.",
                     duration=25,
-                    objectives=["Describe what deployment changes.", "Connect a repo to Vercel.", "Verify the live result after launch."],
-                    takeaways=["Deployment proves the project works beyond the local machine.", "A live URL is a strong milestone artifact."],
-                    flow=["Connect the repo.", "Trigger deployment.", "Test the live URL.", "Fix and redeploy if needed."],
-                    markdown="# Deploy and verify on Vercel\n\nA project becomes easier to share, review, and celebrate when it is live on the web.",
-                    visual="## Visual aid\n`Repository` -> `Vercel deploy` -> `Live verification`",
+                    objectives=[
+                        "Explain what changes when a project moves from local development to live hosting.",
+                        "Describe the basic GitHub-to-Vercel deployment path.",
+                        "Verify the live result instead of assuming deployment success means everything works.",
+                    ],
+                    takeaways=[
+                        "Deployment proves the project can run outside the learner's machine.",
+                        "A live URL matters most when it has been tested after launch.",
+                    ],
+                    flow=[
+                        "Connect the GitHub repository to Vercel.",
+                        "Trigger the first deployment.",
+                        "Open the live URL and test the main flows.",
+                        "Fix issues and redeploy if the live experience does not match local behavior.",
+                    ],
+                    markdown=(
+                        "# Deploy and verify on Vercel\n\n"
+                        "Publishing the project is one of the clearest milestone moments, but deployment is not only about clicking a button.\n\n"
+                        "## Deployment turns the repo into a public build\n"
+                        "Once Vercel connects to the repository, it can create a live version of the frontend that others can open in a browser. "
+                        "That makes the project easier to review, celebrate, and include in a portfolio.\n\n"
+                        "## The live URL still needs testing\n"
+                        "A green deployment status does not guarantee the interface behaves correctly. "
+                        "Buttons, routes, API calls, responsive sections, and styling should all be checked on the live version.\n\n"
+                        "## Use a verification checklist\n"
+                        "Open the homepage, inspect the main sections, test the primary interaction, and confirm that the live build reflects the latest pushed code. "
+                        "That habit prevents embarrassing last-step mistakes.\n\n"
+                        "## Why this is milestone evidence\n"
+                        "A working live URL proves the learner can finish the journey from local files to public product."
+                    ),
+                    visual=(
+                        "## Visual aid\n"
+                        "`GitHub repository` -> `Vercel import` -> `Production deploy` -> `Open live URL` -> `Verify key flows`\n"
+                    ),
                     practice="Deploy a small frontend project, then click through the main interface once to confirm it matches the local version.",
+                    playground=None,
                 ),
                 _lesson(
                     title="Prepare the milestone showcase",
                     slug=f"{COURSE_SLUG}-milestone-showcase-project",
-                    summary="Package the repository, live URL, and project explanation into a final milestone story.",
+                    summary="Package the repository, live URL, feature summary, and reflection into a final milestone presentation that feels credible.",
                     duration=30,
-                    objectives=["Summarize what the project proves.", "Gather final milestone evidence.", "Reflect on the tools used in the build."],
-                    takeaways=["Presentation is part of engineering communication.", "The repo, live URL, and reflection together make the milestone credible."],
-                    flow=["Choose the project to present.", "List the technologies used.", "Attach the repo and live URL.", "Prepare a short walkthrough."],
-                    markdown="# Prepare the milestone showcase\n\nFinishing the milestone means being able to explain the build, not just ship the code.",
-                    visual="## Visual aid\n`Project summary` -> `Repository` -> `Live URL` -> `Reflection`",
-                    practice="Write a short milestone summary that names the problem, the tools used, the live URL, and one improvement for later.",
+                    objectives=[
+                        "Summarize the problem the milestone project solves.",
+                        "Gather the key proof points needed for review.",
+                        "Present the build with a short reflection on decisions and next steps.",
+                    ],
+                    takeaways=[
+                        "Engineering communication is part of the milestone, not separate from it.",
+                        "A strong showcase combines the working product, the code, and the story behind the build.",
+                    ],
+                    flow=[
+                        "Choose the project you want to present.",
+                        "Summarize the core features and stack.",
+                        "Attach the GitHub repository and live URL.",
+                        "Prepare a short walkthrough plus one honest improvement for the future.",
+                    ],
+                    markdown=(
+                        "# Prepare the milestone showcase\n\n"
+                        "Finishing the milestone means more than shipping code. It means being able to explain what you built, how it works, and why it proves real frontend progress.\n\n"
+                        "## What the showcase should include\n"
+                        "A strong milestone presentation usually includes the project goal, the main features, the tools used, the GitHub repository, and the live URL. "
+                        "That combination gives reviewers both proof and context.\n\n"
+                        "## Talk about decisions, not only features\n"
+                        "It is useful to mention why Flexbox was used in one section, why the data was modeled as an array of objects, or how async rendering changed the interface. "
+                        "Those explanations show understanding instead of lucky assembly.\n\n"
+                        "## Add one reflection point\n"
+                        "A believable showcase often includes one improvement you would make next, such as better loading states, stronger accessibility, or refined mobile spacing. "
+                        "That shows maturity, not weakness.\n\n"
+                        "## The goal of the final story\n"
+                        "Someone viewing the milestone should quickly understand what the project is, how to access it, and why it proves the learner can build and launch a frontend experience."
+                    ),
+                    visual=(
+                        "## Visual aid\n"
+                        "`Project goal` -> `Core features` -> `GitHub repo` -> `Live URL` -> `Reflection + next step`\n\n"
+                        "The showcase turns the build into a clear narrative."
+                    ),
+                    practice="Write a short milestone summary that names the problem, the tools used, the live URL, the repository, and one improvement for later.",
+                    playground=_web_playground(
+                        "Create a simple milestone showcase board with the project title, stack, repository link, live URL, and one future improvement.",
+                        "<section class=\"showcase-board\">\n  <p class=\"eyebrow\">Frontend Milestone</p>\n  <h1>Launch your final project story</h1>\n  <div class=\"showcase-grid\">\n    <article class=\"showcase-card\">\n      <h2>Project</h2>\n      <p>Replace this with your milestone summary.</p>\n    </article>\n    <article class=\"showcase-card links\">\n      <h2>Proof links</h2>\n      <a href=\"https://github.com\" target=\"_blank\" rel=\"noreferrer\">GitHub repository</a>\n      <a href=\"https://vercel.com\" target=\"_blank\" rel=\"noreferrer\">Live URL</a>\n    </article>\n  </div>\n  <ul class=\"next-steps\">\n    <li>Add one future improvement here.</li>\n  </ul>\n</section>",
+                        "body {\n  margin: 0;\n  padding: 2rem;\n  font-family: 'Segoe UI', sans-serif;\n  background: linear-gradient(135deg, #0f172a 0%, #1d4ed8 100%);\n  color: white;\n}\n\n.showcase-board {\n  max-width: 840px;\n  margin: 0 auto;\n}\n\n.showcase-grid {\n  display: grid;\n  gap: 1rem;\n  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));\n}\n\n.showcase-card {\n  padding: 1rem;\n  border-radius: 1rem;\n  background: rgba(15, 23, 42, 0.78);\n}\n\n.links a {\n  display: block;\n  color: #bfdbfe;\n  margin-top: 0.5rem;\n}\n",
+                        "",
+                        [
+                            {"label": "Include a showcase grid", "type": "includes", "target": "html", "value": "showcase-grid"},
+                            {"label": "Add a GitHub repository link", "type": "includes", "target": "html", "value": "GitHub repository"},
+                            {"label": "Add a live URL link", "type": "includes", "target": "html", "value": "Live URL"},
+                            {"label": "List a future improvement", "type": "includes", "target": "html", "value": "<li>"},
+                        ],
+                    ),
                     content_type="project",
                 ),
             ],
@@ -366,6 +710,18 @@ QUIZ_BANK: dict[str, list[dict[str, Any]]] = {
             "Easy",
         ),
         _question(
+            "What is the main value of planning a semantic scaffold before styling?",
+            [
+                "It makes the page easier to structure, style, and explain later",
+                "It removes the need for CSS classes entirely",
+                "It guarantees the project will deploy successfully",
+                "It replaces the need for JavaScript",
+            ],
+            "It makes the page easier to structure, style, and explain later",
+            "Semantic structure gives the milestone a strong foundation before layout and behavior are added.",
+            "Easy",
+        ),
+        _question(
             "Where should an external stylesheet usually be linked in a basic HTML page?",
             [
                 "Inside the footer",
@@ -378,6 +734,30 @@ QUIZ_BANK: dict[str, list[dict[str, Any]]] = {
             "Easy",
         ),
         _question(
+            "Why is `gap` often better than adding random margins to every Flexbox child?",
+            [
+                "It communicates spacing at the container level and is easier to maintain",
+                "It makes semantic HTML unnecessary",
+                "It only works on desktop screens",
+                "It turns Flexbox into Grid automatically",
+            ],
+            "It communicates spacing at the container level and is easier to maintain",
+            "Container-level spacing rules are usually cleaner and more consistent than scattered child margins.",
+            "Medium",
+        ),
+        _question(
+            "What does `flex-wrap` help prevent in a milestone layout?",
+            [
+                "Cards becoming cramped in one forced row on smaller screens",
+                "JavaScript functions from running",
+                "The browser from loading CSS",
+                "The need for semantic tags",
+            ],
+            "Cards becoming cramped in one forced row on smaller screens",
+            "Wrapping helps the section adapt instead of squeezing content into unreadable layouts.",
+            "Medium",
+        ),
+        _question(
             "What is the main reason to start a project with semantic HTML before styling?",
             [
                 "It makes the page easier to structure, style, and maintain",
@@ -387,6 +767,18 @@ QUIZ_BANK: dict[str, list[dict[str, Any]]] = {
             ],
             "It makes the page easier to structure, style, and maintain",
             "Semantic structure gives the rest of the project a cleaner foundation.",
+            "Medium",
+        ),
+        _question(
+            "Why is `defer` commonly used when linking a JavaScript file from HTML?",
+            [
+                "It allows HTML parsing to continue before the script runs",
+                "It automatically pushes the project to GitHub",
+                "It converts JavaScript into CSS",
+                "It disables the browser console",
+            ],
+            "It allows HTML parsing to continue before the script runs",
+            "Using `defer` helps the script load in a way that does not unnecessarily block the page.",
             "Medium",
         ),
     ],
@@ -404,6 +796,18 @@ QUIZ_BANK: dict[str, list[dict[str, Any]]] = {
             "Easy",
         ),
         _question(
+            "What is the main role of parameters in a function?",
+            [
+                "They let the same function work with different input values",
+                "They replace the need for return statements",
+                "They only work inside HTML files",
+                "They automatically render the DOM",
+            ],
+            "They let the same function work with different input values",
+            "Parameters carry the changing pieces so the function can stay reusable.",
+            "Easy",
+        ),
+        _question(
             "When storing several project cards with titles and descriptions, which structure is usually most practical?",
             [
                 "An array of project objects",
@@ -416,6 +820,18 @@ QUIZ_BANK: dict[str, list[dict[str, Any]]] = {
             "Easy",
         ),
         _question(
+            "Why is it useful to keep the same property names across similar objects?",
+            [
+                "It makes rendering logic more predictable and easier to maintain",
+                "It forces the page to use Grid layout",
+                "It removes the need for loops",
+                "It makes Git commits unnecessary",
+            ],
+            "It makes rendering logic more predictable and easier to maintain",
+            "Consistent property names help the rendering layer read every record in the same way.",
+            "Medium",
+        ),
+        _question(
             "What does DOM rendering mean in this course context?",
             [
                 "Turning stored data into visible content on the page",
@@ -425,6 +841,30 @@ QUIZ_BANK: dict[str, list[dict[str, Any]]] = {
             ],
             "Turning stored data into visible content on the page",
             "Rendering is the step where JavaScript updates what the learner sees on screen.",
+            "Medium",
+        ),
+        _question(
+            "What is usually the first DOM step before rendering repeated cards?",
+            [
+                "Selecting the container that should receive the output",
+                "Deploying the project to Vercel",
+                "Creating a GitHub repository",
+                "Writing a media query",
+            ],
+            "Selecting the container that should receive the output",
+            "A render flow usually begins with choosing the element that should hold the repeated content.",
+            "Medium",
+        ),
+        _question(
+            "Why is console output not the finish line for a data-driven interface?",
+            [
+                "Because the user still needs the data to appear clearly in the UI",
+                "Because console output deletes the DOM",
+                "Because APIs do not allow logging",
+                "Because JavaScript cannot read arrays after logging",
+            ],
+            "Because the user still needs the data to appear clearly in the UI",
+            "Logging helps debugging, but the frontend goal is visible, understandable output.",
             "Medium",
         ),
     ],
@@ -442,6 +882,18 @@ QUIZ_BANK: dict[str, list[dict[str, Any]]] = {
             "Easy",
         ),
         _question(
+            "What should happen after an API response is converted to JSON in a frontend milestone project?",
+            [
+                "Useful fields should be rendered into the interface",
+                "The HTML file should be deleted",
+                "The CSS should move into the JSON response",
+                "The data should be hidden permanently in the console",
+            ],
+            "Useful fields should be rendered into the interface",
+            "The milestone expects the learner to move from fetched data to visible UI output.",
+            "Easy",
+        ),
+        _question(
             "What is the best next step after fetching JSON from an API for a frontend interface?",
             [
                 "Render the needed fields into the DOM in a clear format",
@@ -452,6 +904,66 @@ QUIZ_BANK: dict[str, list[dict[str, Any]]] = {
             "Render the needed fields into the DOM in a clear format",
             "Fetching is only part of the job. The interface still needs to show the result clearly.",
             "Medium",
+        ),
+        _question(
+            "Why do meaningful commits strengthen a milestone submission?",
+            [
+                "They show the build history as a sequence of understandable checkpoints",
+                "They remove the need for deployment",
+                "They replace live testing",
+                "They make CSS selectors optional",
+            ],
+            "They show the build history as a sequence of understandable checkpoints",
+            "Commit history helps reviewers see how the learner approached the build over time.",
+            "Medium",
+        ),
+        _question(
+            "What does Vercel mainly provide in this course workflow?",
+            [
+                "A way to publish the repository as a live frontend build",
+                "A replacement for semantic HTML",
+                "A database for JavaScript arrays",
+                "An editor for writing Git commits",
+            ],
+            "A way to publish the repository as a live frontend build",
+            "Vercel helps turn the GitHub-connected project into a public live URL.",
+            "Medium",
+        ),
+        _question(
+            "Why should the live URL be tested after deployment instead of assumed correct?",
+            [
+                "Because a successful deploy status does not guarantee the interface behaves correctly",
+                "Because testing only works before GitHub is used",
+                "Because Vercel hides all frontend errors automatically",
+                "Because deployment always changes the project design",
+            ],
+            "Because a successful deploy status does not guarantee the interface behaves correctly",
+            "Live verification checks that the public build matches the intended experience.",
+            "Medium",
+        ),
+        _question(
+            "What makes a milestone showcase feel credible?",
+            [
+                "It explains the project goal, features, stack, proof links, and one thoughtful reflection",
+                "It only includes a screenshot of the homepage",
+                "It avoids mentioning the tools used",
+                "It hides the repository so no one can inspect it",
+            ],
+            "It explains the project goal, features, stack, proof links, and one thoughtful reflection",
+            "A good showcase combines explanation, evidence, and reflection into one clear story.",
+            "Medium",
+        ),
+        _question(
+            "Which sequence best matches the milestone journey taught in this course?",
+            [
+                "Scaffold the page, style responsive sections, add JavaScript logic, integrate data, push to GitHub, deploy, and verify",
+                "Deploy immediately, then decide what the page is about later",
+                "Write one huge file, skip version control, and share a screenshot",
+                "Start with Vercel settings before making any HTML structure",
+            ],
+            "Scaffold the page, style responsive sections, add JavaScript logic, integrate data, push to GitHub, deploy, and verify",
+            "The course is designed as an end-to-end frontend build path, not a set of disconnected actions.",
+            "Hard",
         ),
         _question(
             "Which workflow shows the strongest launch discipline for this course?",
@@ -1048,7 +1560,8 @@ def _curriculum_summary(curriculum: dict[str, Any]) -> dict[str, int]:
 async def ensure_frontend_blank_file_milestone_seed() -> None:
     now = datetime.utcnow()
     summary = _curriculum_summary(COURSE_CURRICULUM_TEMPLATE)
-    seeded_new_content = False
+    existing_curriculum = await course_curricula_collection.find_one({"course_slug": COURSE_SLUG})
+    should_refresh_curriculum = _curriculum_seed_version(existing_curriculum) < MILESTONE_SEED_VERSION
 
     existing_course = await course_catalog_collection.find_one({"slug": COURSE_SLUG})
     if not existing_course:
@@ -1070,14 +1583,37 @@ async def ensure_frontend_blank_file_milestone_seed() -> None:
             "thumbnail": "",
             "thumbnail_public_id": "",
             "created_at": now,
+            "updated_at": now,
         }
         result = await course_catalog_collection.insert_one(course_document)
         course_document["_id"] = result.inserted_id
         existing_course = course_document
-        seeded_new_content = True
+        should_refresh_curriculum = True
+    elif should_refresh_curriculum:
+        await course_catalog_collection.update_one(
+            {"slug": COURSE_SLUG},
+            {
+                "$set": {
+                    "title": COURSE_TITLE,
+                    "description": (
+                        "Validate the ability to structure, style, script, version, and deploy a real frontend project from scratch. "
+                        "This milestone mirrors the journey from blank files to a shareable live URL."
+                    ),
+                    "category": "Frontend Development",
+                    "difficulty": "Beginner",
+                    "duration": summary["duration"],
+                    "total_quizzes": summary["total_quizzes"],
+                    "total_lessons": summary["total_lessons"],
+                    "instructor": SEED_AUTHOR,
+                    "prerequisites": [],
+                    "tags": ["html", "css", "javascript", "dom", "apis", "git", "github", "vercel"],
+                    "updated_at": now,
+                }
+            },
+        )
+        existing_course = await course_catalog_collection.find_one({"slug": COURSE_SLUG})
 
-    existing_curriculum = await course_curricula_collection.find_one({"course_slug": COURSE_SLUG})
-    if not existing_curriculum:
+    if should_refresh_curriculum:
         curriculum_document = deepcopy(COURSE_CURRICULUM_TEMPLATE)
         curriculum_document.update(
             {
@@ -1085,44 +1621,24 @@ async def ensure_frontend_blank_file_milestone_seed() -> None:
                 "updated_at": now,
                 "updated_by": SEED_AUTHOR,
                 "is_draft_scaffold": False,
+                "seed_version": MILESTONE_SEED_VERSION,
             }
         )
-        result = await course_curricula_collection.insert_one(curriculum_document)
-        curriculum_document["_id"] = result.inserted_id
-        existing_curriculum = curriculum_document
-        seeded_new_content = True
+        await course_curricula_collection.update_one(
+            {"course_slug": COURSE_SLUG},
+            {"$set": curriculum_document},
+            upsert=True,
+        )
+        existing_curriculum = await course_curricula_collection.find_one({"course_slug": COURSE_SLUG})
 
     if existing_course and existing_curriculum:
         await LessonLibraryService.sync_course_lessons(existing_course, existing_curriculum, SEED_AUTHOR)
 
-    if not seeded_new_content:
+    if not should_refresh_curriculum:
         return
 
     for quiz_id, questions in QUIZ_BANK.items():
-        if await quiz_questions_collection.count_documents({"quiz_id": quiz_id}) > 0:
-            continue
-
-        created_at = datetime.utcnow()
-        await quiz_questions_collection.insert_many(
-            [
-                {
-                    "quiz_id": quiz_id,
-                    "question": question["question"],
-                    "options": question["options"],
-                    "correct_answer": question["correct_answer"],
-                    "explanation": question["explanation"],
-                    "points": question["points"],
-                    "question_type": question["question_type"],
-                    "difficulty": question["difficulty"],
-                    "is_active": question["is_active"],
-                    "time_limit": question["time_limit"],
-                    "created_by": SEED_AUTHOR,
-                    "created_at": created_at,
-                    "updated_at": created_at,
-                }
-                for question in questions
-            ]
-        )
+        await _replace_seed_questions(quiz_id, questions, SEED_AUTHOR)
 
 
 def _curriculum_looks_like_scaffold(curriculum: dict[str, Any] | None) -> bool:
@@ -1138,6 +1654,15 @@ def _curriculum_looks_like_scaffold(curriculum: dict[str, Any] | None) -> bool:
         or str(module.get("title") or "").strip() == "Foundation Sprint"
         for module in modules
     )
+
+
+def _curriculum_seed_version(curriculum: dict[str, Any] | None) -> int:
+    if not curriculum:
+        return 0
+    try:
+        return int(curriculum.get("seed_version") or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _curriculum_missing_lesson_games(curriculum: dict[str, Any] | None, expected_games: dict[str, str]) -> bool:
