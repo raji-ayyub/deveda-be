@@ -2389,15 +2389,14 @@ def _lesson_tutor_reply(message: str, context: dict) -> str:
 
 
 def _build_controlled_lesson_tutor_reply(message: str, context: dict) -> Optional[dict]:
-    if not _lesson_tutor_general_turn(message):
-        return None
-
     lesson = context.get("lesson") or {}
     course = context.get("course") or {}
     lesson_title = str(lesson.get("title") or context.get("lessonTitle") or "").strip()
     course_title = str(course.get("title") or context.get("courseTitle") or "").strip()
+    lesson_focus = str(lesson.get("summary") or "").strip()
     progress = context.get("currentProgress")
     normalized_message = _normalize_text(message)
+    topic_text = _normalize_text(f"{lesson.get('title', '')} {lesson.get('summary', '')}" if lesson else "")
 
     if lesson_title and course_title:
         scope = f"`{lesson_title}` in `{course_title}`"
@@ -2446,17 +2445,147 @@ def _build_controlled_lesson_tutor_reply(message: str, context: dict) -> Optiona
             content = f"Yes. I've got your {scope} context and your current progress at {progress}%. Tell me what part feels confusing."
         else:
             content = f"Yes. I'm here for {scope}. Tell me what feels confusing, and we'll break it down together."
-    else:
+    elif _message_has_any_phrase(
+        message,
+        (
+            "run button",
+            "press run",
+            "not updating",
+            "not showing",
+            "isnt showing",
+            "isnt updating",
+            "preview",
+            "output",
+            "result",
+        ),
+    ):
+        if any(keyword in topic_text for keyword in ("array", "object", "render", "collection")):
+            content = (
+                "It sounds like the code is running, but the page is not re-rendering the way you expect.\n\n"
+                "A common cause is that the data changes in JavaScript, but the updated markup never gets written back into the page. "
+                "Another common cause is that the selector points at the wrong element.\n\n"
+                "A calm way to check it is to compare three pieces: the HTML target, the function that turns data into markup, and the line that writes that markup into the page."
+            )
+        elif any(keyword in topic_text for keyword in ("flexbox", "align")):
+            content = (
+                "That usually means the layout rules are landing on the wrong element.\n\n"
+                "With Flexbox, the parent container normally needs `display: flex`, and rules like `justify-content` and `align-items` affect the children from there. "
+                "If those styles are on a child instead, the page can look unchanged after Run."
+            )
+        else:
+            content = (
+                "It sounds like the code is executing, but the visible result is not changing yet.\n\n"
+                "The fastest check is to compare the element you expect to change, the selector or variable pointing to it, and the line that updates the page after the logic runs."
+            )
+    elif _message_has_any_phrase(message, ("show me", "example", "sample")):
+        if any(keyword in topic_text for keyword in ("array", "object", "render", "collection")):
+            content = (
+                "A small example may help here:\n\n"
+                "```js\n"
+                "const students = [\n"
+                "  { name: 'Ada', score: 92 },\n"
+                "  { name: 'Tomi', score: 88 },\n"
+                "];\n\n"
+                "const list = document.querySelector('#student-list');\n"
+                "list.innerHTML = students\n"
+                "  .map((student) => `<li>${student.name} - ${student.score}</li>`)\n"
+                "  .join('');\n"
+                "```\n\n"
+                "The array holds many records, each object holds one record, and `map()` turns each record into repeated HTML."
+            )
+        elif any(keyword in topic_text for keyword in ("flexbox", "align")):
+            content = (
+                "Here is a compact Flexbox example:\n\n"
+                "```html\n"
+                "<div class=\"toolbar\">\n"
+                "  <span>Logo</span>\n"
+                "  <button>Profile</button>\n"
+                "</div>\n"
+                "```\n\n"
+                "```css\n"
+                ".toolbar {\n"
+                "  display: flex;\n"
+                "  justify-content: space-between;\n"
+                "  align-items: center;\n"
+                "}\n"
+                "```\n\n"
+                "The key idea is that Flexbox lives on the parent, and the children respond to that shared layout rule."
+            )
+        elif lesson_focus:
+            content = (
+                f"Here is a smaller example angle for {scope}:\n\n"
+                f"{lesson_focus}\n\n"
+                "If you want, send the exact part you want turned into an example and I'll make it more concrete."
+            )
+        else:
+            return None
+    elif _message_has_any_phrase(message, ("what is", "how does", "why", "explain", "dont understand", "do not understand", "confused")):
+        if any(keyword in topic_text for keyword in ("array", "object", "render", "collection")):
+            content = (
+                "In this lesson, arrays and objects are doing two different jobs.\n\n"
+                "An array keeps the whole collection together. An object keeps one item's details together. "
+                "Rendering means taking each object in the array and turning it into one repeated piece of interface, like a card or list row."
+            )
+        elif any(keyword in topic_text for keyword in ("flexbox", "align")):
+            content = (
+                "Flexbox is a layout system where the parent container decides how its children line up.\n\n"
+                "Instead of positioning each child one by one, the parent sets the direction, spacing, and alignment. "
+                "That is why `display: flex` matters most on the wrapper."
+            )
+        elif lesson_focus:
+            content = (
+                f"Here is the core idea in simpler words:\n\n{lesson_focus}\n\n"
+                "If you want, we can make it even smaller by focusing on one line or one term."
+            )
+        else:
+            return None
+    elif lesson and _lesson_tutor_general_turn(message):
         content = (
-            "That sounds frustrating. We can slow it down and take one piece at a time.\n\n"
-            "If you want, tell me the exact part that feels stuck, or paste the code and I'll help you narrow it down."
+            f"I'm here with you inside {scope}.\n\n"
+            f"Current focus: {lesson_focus or 'This lesson builds one core skill in manageable steps.'} "
+            "Tell me what part feels unclear, and we'll take only that piece."
         )
+    elif course and _lesson_tutor_general_turn(message):
+        content = (
+            f"I'm here with you in {scope}. "
+            "I can help unpack ideas with simpler wording, examples, and step-by-step explanations."
+        )
+    else:
+        return None
 
     return {
         "content": content,
         "metadata": {
             "provider": "deveda-controlled",
-            "mode": "conversation",
+            "mode": "conversation" if _lesson_tutor_general_turn(message) else "tutoring",
+        },
+    }
+
+
+def _lesson_tutor_service_unavailable_reply(context: dict) -> dict:
+    lesson = context.get("lesson") or {}
+    course = context.get("course") or {}
+    lesson_title = str(lesson.get("title") or context.get("lessonTitle") or "").strip()
+    course_title = str(course.get("title") or context.get("courseTitle") or "").strip()
+
+    if lesson_title and course_title:
+        scope = f"`{lesson_title}` in `{course_title}`"
+    elif lesson_title:
+        scope = f"`{lesson_title}`"
+    elif course_title:
+        scope = f"`{course_title}`"
+    else:
+        scope = "this lesson"
+
+    return {
+        "content": (
+            f"Nexa is not available right now for {scope}.\n\n"
+            "Please keep going with your lesson, take the next small step, and keep practicing what you already understand. "
+            "You're still making progress, and Nexa should be back soon."
+        ),
+        "metadata": {
+            "provider": "deveda-temporary-fallback",
+            "mode": "service_unavailable",
         },
     }
 
@@ -4000,6 +4129,43 @@ class AgentService:
                 },
             )
         except HTTPException as exc:
+            if thread.get("agent_type") == "lesson_tutor" and exc.status_code >= status.HTTP_500_INTERNAL_SERVER_ERROR:
+                fallback_context = {}
+                if payload.courseTitle:
+                    fallback_context["courseTitle"] = payload.courseTitle
+                if payload.lessonTitle:
+                    fallback_context["lessonTitle"] = payload.lessonTitle
+
+                ai_reply = _lesson_tutor_service_unavailable_reply(fallback_context)
+                user_message = await _store_message(thread["_id"], "user", payload.message)
+                assistant_message = await _store_message(
+                    thread["_id"],
+                    "assistant",
+                    ai_reply["content"],
+                    ai_reply["metadata"],
+                )
+                await agent_threads_collection.update_one(
+                    {"_id": thread["_id"]},
+                    {"$set": {"updated_at": datetime.utcnow(), "last_message_preview": ai_reply["content"][:180]}},
+                )
+                await _finish_agent_run(
+                    run["_id"],
+                    status_value="completed",
+                    steps=[],
+                    output={
+                        "assistantMessageId": str(assistant_message["_id"]),
+                        "artifactCount": 0,
+                        "fallbackMode": "service_unavailable",
+                    },
+                )
+                return {
+                    "message": "Agent response created",
+                    "data": {
+                        "userMessage": _serialize_message(user_message),
+                        "assistantMessage": _serialize_message(assistant_message),
+                    },
+                }
+
             await _finish_agent_run(
                 run["_id"],
                 status_value="failed",
