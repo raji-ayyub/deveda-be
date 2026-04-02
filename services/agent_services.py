@@ -2435,7 +2435,7 @@ def _build_controlled_lesson_tutor_reply(message: str, context: dict) -> Optiona
         content = "Anytime. If another part feels off, send it over and we'll take it one step at a time."
     elif _message_has_any_phrase(message, ("who are you", "what can you do")):
         content = (
-            f"I'm Nexa, your lesson tutor for {scope}. I can explain ideas in simpler words, give smaller examples, "
+            f"I'm Zara, your lesson tutor for {scope}. I can explain ideas in simpler words, give smaller examples, "
             "and help you talk through what is confusing without rushing you."
         )
     elif _message_has_any_phrase(message, ("how are you", "are you there")):
@@ -2579,9 +2579,9 @@ def _lesson_tutor_service_unavailable_reply(context: dict) -> dict:
 
     return {
         "content": (
-            f"Nexa is not available right now for {scope}.\n\n"
+            f"Zara is not available right now for {scope}.\n\n"
             "Please keep going with your lesson, take the next small step, and keep practicing what you already understand. "
-            "You're still making progress, and Nexa should be back soon."
+            "You're still making progress, and Zara should be back soon."
         ),
         "metadata": {
             "provider": "deveda-temporary-fallback",
